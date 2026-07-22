@@ -32,12 +32,24 @@ jobs:
       - name: Install test dependencies
         run: make install-test
 
+      # FORK-ONLY: image names overridden to the shaunbarlow Docker Hub
+      # namespace (make command-line overrides beat the Makefile's `:=`
+      # assignments). Drop this commit before PRing upstream.
       - name: Build, test, and push agent images
-        run: make agent-ci
+        run: |
+          make agent-ci \
+            AGENT_IMAGE=shaunbarlow/openclaw \
+            BROWSER_BASE_IMAGE=shaunbarlow/base-browser \
+            BROWSER_CHROMIUM_IMAGE=shaunbarlow/chromium-browser \
+            BROWSER_CHROME_IMAGE=shaunbarlow/chrome-browser \
+            BROWSER_BRAVE_IMAGE=shaunbarlow/brave-browser
         env:
           CACHE_ARGS: --cache-from type=gha,scope=agent --cache-to type=gha,mode=max,scope=agent
 
       - name: Build, test, and push stable agent image
-        run: make agent-stable-ci
+        run: |
+          make agent-stable-ci \
+            STABLE_IMAGE=shaunbarlow/claworc-stable \
+            STABLE_MIRROR_IMAGE=shaunbarlow/openclaw-stable
         env:
           CACHE_ARGS: --cache-from type=gha,scope=agent-stable --cache-to type=gha,mode=max,scope=agent-stable

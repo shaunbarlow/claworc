@@ -99,6 +99,8 @@ jobs:
         env:
           CLAWORC_LLM_GATEWAY_PORT: 40001
 
+  # FORK-ONLY: build jobs below push to the shaunbarlow Docker Hub namespace
+  # instead of claworc/. Drop this commit before PRing upstream.
   build-amd64:
     name: Build amd64
     if: github.ref == 'refs/heads/main'
@@ -118,7 +120,7 @@ jobs:
           context: control-plane/
           platforms: linux/amd64
           push: true
-          tags: claworc/claworc:build-amd64
+          tags: shaunbarlow/claworc:build-amd64
           cache-from: type=gha,scope=control-plane-amd64
           cache-to: type=gha,mode=max,scope=control-plane-amd64
 
@@ -141,7 +143,7 @@ jobs:
           context: control-plane/
           platforms: linux/arm64
           push: true
-          tags: claworc/claworc:build-arm64
+          tags: shaunbarlow/claworc:build-arm64
           cache-from: type=gha,scope=control-plane-arm64
           cache-to: type=gha,mode=max,scope=control-plane-arm64
 
@@ -161,6 +163,6 @@ jobs:
       - name: Create and push multi-arch manifest
         run: |
           docker buildx imagetools create \
-            -t claworc/claworc:latest \
-            claworc/claworc:build-amd64 \
-            claworc/claworc:build-arm64
+            -t shaunbarlow/claworc:latest \
+            shaunbarlow/claworc:build-amd64 \
+            shaunbarlow/claworc:build-arm64
