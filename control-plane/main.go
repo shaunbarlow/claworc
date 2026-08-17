@@ -419,6 +419,10 @@ func main() {
 			r.Patch("/instances/{id}/browser-active", handlers.SetBrowserActive)
 			r.Patch("/instances/{id}/browser-enabled", handlers.SetBrowserEnabled)
 
+			// Memory backend (builtin/QMD) configuration.
+			r.Get("/instances/{id}/memory", handlers.GetInstanceMemory)
+			r.Patch("/instances/{id}/memory", handlers.SetInstanceMemory)
+
 			// Kanban
 			r.Get("/kanban/boards", handlers.ListKanbanBoards)
 			r.Post("/kanban/boards", handlers.CreateKanbanBoard)

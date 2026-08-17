@@ -34,6 +34,7 @@ var plainSettings = []string{
 	"default_timezone",
 	"default_user_agent",
 	"default_models",
+	"default_memory_backend",
 	"analytics_consent",
 }
 
@@ -118,6 +119,9 @@ func settingsToResponse(raw map[string]string) map[string]interface{} {
 		result[k] = list
 	}
 	result["default_affinity"] = raw["default_affinity"]
+
+	// Global QMD memory defaults (JSON MemoryQmdSettings object).
+	result["default_memory_qmd"] = loadMemoryQmdSettings(raw["default_memory_qmd"])
 
 	return result
 }
@@ -216,6 +220,38 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handle memory backend defaults. Track whether either key actually
+	// changed so we can reconcile running instances' OpenClaw config below.
+	memoryChanged := false
+	if v, ok := raw["default_memory_backend"]; ok {
+		if strVal, ok := v.(string); ok {
+			if !isValidMemoryBackend(strVal) || strVal == "" {
+				writeError(w, http.StatusBadRequest, "default_memory_backend must be \"builtin\" or \"qmd\"")
+				return
+			}
+			prev, _ := database.GetSetting("default_memory_backend")
+			if strVal != prev {
+				memoryChanged = true
+			}
+		}
+	}
+	if v, ok := raw["default_memory_qmd"]; ok {
+		b, err := json.Marshal(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_memory_qmd")
+			return
+		}
+		if _, err := parseMemoryQmdSettings(b); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_memory_qmd: "+err.Error())
+			return
+		}
+		prev, _ := database.GetSetting("default_memory_qmd")
+		if string(b) != prev {
+			memoryChanged = true
+		}
+		database.SetSetting("default_memory_qmd", string(b))
+	}
+
 	// Handle pod placement + service/port settings (stored as JSON strings)
 	for _, key := range []string{
 		"default_pod_annotations", "default_node_selector", "default_tolerations",
@@ -278,6 +314,23 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				Name:        running[i].Name,
 				DisplayName: running[i].DisplayName,
 			})
+		}
+	}
+
+	// Reconcile every running instance's OpenClaw memory config when the
+	// global memory defaults changed. Much cheaper than the env-var cascade
+	// above: only the openclaw-gateway process restarts, not the container.
+	// Instances with a full per-instance override still get a push — the
+	// resolved config is computed per instance, so theirs simply re-applies
+	// the same values.
+	if memoryChanged {
+		var running []database.Instance
+		database.DB.Where("status = ?", "running").Find(&running)
+		for i := range running {
+			if database.IsLegacyEmbedded(running[i].ContainerImage) {
+				continue
+			}
+			pushMemoryConfig(running[i].ID, running[i].Name)
 		}
 	}
 

@@ -114,7 +114,14 @@ type Instance struct {
 	// BrowserActive — which is pane visibility and leaves lazy re-spawn
 	// possible — this forbids the pod entirely so no-browser agents consume
 	// no browser resources. Ignored for legacy embedded instances.
-	BrowserEnabled bool      `gorm:"not null;default:true" json:"browser_enabled"`
+	BrowserEnabled bool `gorm:"not null;default:true" json:"browser_enabled"`
+	// MemoryBackend overrides the global default_memory_backend setting for
+	// this instance's OpenClaw memory subsystem. "" = inherit the global
+	// default; otherwise "builtin" or "qmd".
+	MemoryBackend string `gorm:"default:''" json:"memory_backend"`
+	// MemoryQmd is a JSON MemoryQmdSettings override object merged on top of
+	// the global default_memory_qmd setting (field-wise; instance wins).
+	MemoryQmd     string    `gorm:"type:text;default:'{}'" json:"-"`
 	TeamID        uint      `gorm:"not null;default:1;index" json:"team_id"`
 	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
@@ -328,9 +335,16 @@ type SharedFolder struct {
 	// No GORM `default` tag here on purpose: with one, GORM treats a false value
 	// as "unset" and lets the DB default win, so an explicit read-write choice
 	// would be silently flipped back to read-only on insert.
-	ReadOnly  bool      `json:"read_only"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ReadOnly bool `json:"read_only"`
+	// QmdIndex marks this folder for inclusion in the QMD memory index of
+	// every attached instance whose effective memory backend is "qmd". No
+	// GORM `default` tag for the same reason as ReadOnly above.
+	QmdIndex bool `json:"qmd_index"`
+	// QmdPattern is the glob applied within the folder when indexing.
+	// "" = QMD's default ("**/*.md").
+	QmdPattern string    `gorm:"default:''" json:"qmd_pattern"`
+	CreatedAt  time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // ParseSharedFolderInstanceIDs deserializes the JSON instance IDs field.

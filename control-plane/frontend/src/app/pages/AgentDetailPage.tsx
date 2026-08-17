@@ -40,8 +40,10 @@ import {
 } from "@common/hooks/useInstances";
 import { useProviders } from "@common/hooks/useProviders";
 import { useSettings } from "@common/hooks/useSettings";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
-import { setInstanceBrowserEnabled } from "@common/api/instances";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { setInstanceBrowserEnabled, fetchInstanceMemory, updateInstanceMemory } from "@common/api/instances";
+import type { InstanceMemoryUpdatePayload } from "@common/types/instance";
+import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
 import { fetchCatalogProviderDetail } from "@common/api/llm";
 import type { CatalogProviderDetail } from "@common/api/llm";
 import ProviderIcon from "@common/components/ProviderIcon";
@@ -56,7 +58,7 @@ import { useHealth } from "@common/hooks/useHealth";
 import WebhookSection from "@common/components/WebhookSection";
 import LegacyBrowserBanner from "@common/components/LegacyBrowserBanner";
 import AppToast from "@common/components/AppToast";
-import { infoToast } from "@common/utils/toast";
+import { infoToast, successToast, errorToast } from "@common/utils/toast";
 import toast from "react-hot-toast";
 import { useSSHStatus, useSSHEvents } from "@common/hooks/useSSHStatus";
 import { useInstanceLogs } from "@common/hooks/useInstanceLogs";
@@ -258,6 +260,22 @@ export default function AgentDetailPage() {
         { id: "browser-enabled", duration: 5000 },
       );
     },
+  });
+
+  // Memory backend (builtin/QMD) — fetched lazily on the settings tab.
+  // NOTE: hooks must stay above the early returns below (see commit 0c1a9ab).
+  const { data: instanceMemory } = useQuery({
+    queryKey: ["instances", instanceId, "memory"],
+    queryFn: () => fetchInstanceMemory(instanceId),
+    enabled: activeTab === "settings" && instance?.is_legacy_embedded === false,
+  });
+  const memoryMutation = useMutation({
+    mutationFn: (payload: InstanceMemoryUpdatePayload) => updateInstanceMemory(instanceId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instances", instanceId, "memory"] });
+      successToast("Memory settings saved", "The agent's OpenClaw gateway is restarting to apply them.");
+    },
+    onError: (err: unknown) => errorToast("Failed to save memory settings", err),
   });
 
   if (isLoading) {
@@ -876,6 +894,30 @@ export default function AgentDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Memory backend card (builtin/QMD) — non-legacy agents only */}
+          {!instance.is_legacy_embedded && instanceMemory && (
+            <MemorySettingsEditor
+              key={`mem-${JSON.stringify(instanceMemory.memory_backend)}-${JSON.stringify(instanceMemory.qmd)}`}
+              title="Memory"
+              description={`OpenClaw memory backend for this agent. "Inherit" follows the global default (currently ${instanceMemory.default_backend}). Unset QMD fields inherit the global defaults.`}
+              backend={instanceMemory.memory_backend}
+              backendOptions={[
+                { value: "", label: `Inherit (${instanceMemory.default_backend})` },
+                { value: "builtin", label: "Builtin (OpenClaw default)" },
+                { value: "qmd", label: "QMD (local hybrid search)" },
+              ]}
+              qmd={instanceMemory.qmd}
+              effectiveQmd={instanceMemory.effective_qmd}
+              indexedFolders={instanceMemory.indexed_folders}
+              inheritBackend={instanceMemory.default_backend}
+              footnote="Saving restarts the openclaw-gateway service."
+              onSave={async (backend, qmd) => {
+                await memoryMutation.mutateAsync({ memory_backend: backend, qmd });
+              }}
+              isSaving={memoryMutation.isPending}
+            />
+          )}
 
           {/* Resources card */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">

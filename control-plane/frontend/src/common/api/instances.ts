@@ -57,6 +57,21 @@ export async function setInstanceBrowserEnabled(
   return data;
 }
 
+export async function fetchInstanceMemory(
+  id: number,
+): Promise<import("@common/types/instance").InstanceMemory> {
+  const { data } = await client.get(`/instances/${id}/memory`);
+  return data;
+}
+
+export async function updateInstanceMemory(
+  id: number,
+  payload: import("@common/types/instance").InstanceMemoryUpdatePayload,
+): Promise<import("@common/types/instance").InstanceMemory> {
+  const { data } = await client.patch(`/instances/${id}/memory`, payload);
+  return data;
+}
+
 export async function deleteInstance(id: number): Promise<void> {
   await client.delete(`/instances/${id}`);
 }

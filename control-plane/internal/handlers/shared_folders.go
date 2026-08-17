@@ -202,6 +202,8 @@ func ListSharedFolders(w http.ResponseWriter, r *http.Request) {
 		MountPath   string `json:"mount_path"`
 		HostPath    string `json:"host_path"`
 		ReadOnly    bool   `json:"read_only"`
+		QmdIndex    bool   `json:"qmd_index"`
+		QmdPattern  string `json:"qmd_pattern"`
 		OwnerID     uint   `json:"owner_id"`
 		InstanceIDs []uint `json:"instance_ids"`
 		TeamIDs     []uint `json:"team_ids"`
@@ -216,6 +218,8 @@ func ListSharedFolders(w http.ResponseWriter, r *http.Request) {
 			MountPath:   sf.MountPath,
 			HostPath:    sf.HostPath,
 			ReadOnly:    sf.ReadOnly,
+			QmdIndex:    sf.QmdIndex,
+			QmdPattern:  sf.QmdPattern,
 			OwnerID:     sf.OwnerID,
 			InstanceIDs: database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
 			TeamIDs:     database.ParseTeamIDs(sf.TeamIDs),
@@ -234,10 +238,12 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name      string `json:"name"`
-		MountPath string `json:"mount_path"`
-		HostPath  string `json:"host_path"`
-		ReadOnly  *bool  `json:"read_only"`
+		Name       string `json:"name"`
+		MountPath  string `json:"mount_path"`
+		HostPath   string `json:"host_path"`
+		ReadOnly   *bool  `json:"read_only"`
+		QmdIndex   *bool  `json:"qmd_index"`
+		QmdPattern string `json:"qmd_pattern"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -277,12 +283,18 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !isValidQmdPattern(body.QmdPattern) {
+		writeError(w, http.StatusBadRequest, "Invalid qmd_pattern: must be a relative glob without \"..\"")
+		return
+	}
 	sf := &database.SharedFolder{
-		Name:      body.Name,
-		MountPath: body.MountPath,
-		OwnerID:   user.ID,
-		HostPath:  body.HostPath,
-		ReadOnly:  readOnly,
+		Name:       body.Name,
+		MountPath:  body.MountPath,
+		OwnerID:    user.ID,
+		HostPath:   body.HostPath,
+		ReadOnly:   readOnly,
+		QmdIndex:   body.QmdIndex != nil && *body.QmdIndex,
+		QmdPattern: body.QmdPattern,
 	}
 	if err := database.CreateSharedFolder(sf); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create shared folder")
@@ -302,6 +314,8 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		"mount_path":   sf.MountPath,
 		"host_path":    sf.HostPath,
 		"read_only":    sf.ReadOnly,
+		"qmd_index":    sf.QmdIndex,
+		"qmd_pattern":  sf.QmdPattern,
 		"owner_id":     sf.OwnerID,
 		"instance_ids": []uint{},
 		"team_ids":     []uint{},
@@ -359,6 +373,8 @@ func GetSharedFolder(w http.ResponseWriter, r *http.Request) {
 		"mount_path":   sf.MountPath,
 		"host_path":    sf.HostPath,
 		"read_only":    sf.ReadOnly,
+		"qmd_index":    sf.QmdIndex,
+		"qmd_pattern":  sf.QmdPattern,
 		"owner_id":     sf.OwnerID,
 		"instance_ids": database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
 		"team_ids":     database.ParseTeamIDs(sf.TeamIDs),
@@ -395,6 +411,8 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		MountPath   *string `json:"mount_path"`
 		HostPath    *string `json:"host_path"`
 		ReadOnly    *bool   `json:"read_only"`
+		QmdIndex    *bool   `json:"qmd_index"`
+		QmdPattern  *string `json:"qmd_pattern"`
 		InstanceIDs *[]uint `json:"instance_ids"`
 		TeamIDs     *[]uint `json:"team_ids"`
 	}
@@ -468,6 +486,19 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		updates["team_ids"] = database.EncodeTeamIDs(newTeamIDs)
 		membershipChanged = true
 	}
+	qmdChanged := false
+	if body.QmdIndex != nil && *body.QmdIndex != sf.QmdIndex {
+		updates["qmd_index"] = *body.QmdIndex
+		qmdChanged = true
+	}
+	if body.QmdPattern != nil && *body.QmdPattern != sf.QmdPattern {
+		if !isValidQmdPattern(*body.QmdPattern) {
+			writeError(w, http.StatusBadRequest, "Invalid qmd_pattern: must be a relative glob without \"..\"")
+			return
+		}
+		updates["qmd_pattern"] = *body.QmdPattern
+		qmdChanged = true
+	}
 	mountPathChanged := body.MountPath != nil && *body.MountPath != sf.MountPath
 
 	if len(updates) == 0 {
@@ -493,6 +524,19 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		}
 		restartInstanceAsyncWithToast(inst, callerID(r), target.ToastTitle,
 			fmt.Sprintf("%s is being restarted", inst.DisplayName))
+	}
+
+	// Reconcile the OpenClaw memory config of affected instances whenever the
+	// folder's QMD indexing changed, or an indexed folder's membership/mount
+	// path changed. The container restart above alone doesn't rewrite
+	// openclaw.json (it lives on the home PVC); pushMemoryConfig's SSH wait
+	// rides out the restart.
+	nowIndexed := sf.QmdIndex
+	if body.QmdIndex != nil {
+		nowIndexed = *body.QmdIndex
+	}
+	if qmdChanged || ((membershipChanged || mountPathChanged) && (sf.QmdIndex || nowIndexed)) {
+		pushMemoryConfigForFolder(mergeUintSets(oldEffective, newEffective))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
@@ -595,6 +639,19 @@ func symmetricDiffUint(a, b []uint) []uint {
 	return result
 }
 
+// isValidQmdPattern accepts the glob applied within an indexed folder:
+// empty (QMD's default), or a relative pattern with no parent traversal so
+// the index can't reach outside the mount.
+func isValidQmdPattern(p string) bool {
+	if p == "" {
+		return true
+	}
+	if strings.HasPrefix(p, "/") || strings.Contains(p, "..") {
+		return false
+	}
+	return true
+}
+
 // mergeUintSets returns the union of two uint slices with no duplicates.
 func mergeUintSets(a, b []uint) []uint {
 	seen := map[uint]bool{}
@@ -636,6 +693,9 @@ func DeleteSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mappedIDs := database.ParseSharedFolderInstanceIDs(sf.InstanceIDs)
+	// Effective coverage (explicit + team-implicit), captured before the row
+	// disappears, for the memory-config reconcile below.
+	effectiveIDs := expandFolderEffectiveInstances(mappedIDs, database.ParseTeamIDs(sf.TeamIDs))
 
 	if err := database.DeleteSharedFolder(sf.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to delete shared folder")
@@ -657,6 +717,11 @@ func DeleteSharedFolder(w http.ResponseWriter, r *http.Request) {
 		}
 		restartInstanceAsyncWithToast(inst, callerID(r), "Deleting shared folder",
 			fmt.Sprintf("%s is being restarted", inst.DisplayName))
+	}
+
+	// Drop the folder from every affected instance's QMD index paths.
+	if sf.QmdIndex {
+		pushMemoryConfigForFolder(effectiveIDs)
 	}
 
 	// Delete the backing volume in the background (after instances have unmounted it)

@@ -1247,6 +1247,10 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			if !inst.BrowserEnabled {
 				applyBrowserEnabledConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, false)
 			}
+			// Seed the memory backend config (backend selection, QMD knobs,
+			// shared-folder index paths) so first boot matches the resolved
+			// defaults + overrides.
+			applyMemoryConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, buildMemoryConfig(&inst))
 		})
 
 	var totalInstances int64
@@ -2233,6 +2237,10 @@ func CloneInstance(w http.ResponseWriter, r *http.Request) {
 		BrowserStorage:     src.BrowserStorage,
 		BrowserActive:      src.BrowserActive,
 		BrowserEnabled:     src.BrowserEnabled,
+		// Carry over the memory backend override so the clone searches the
+		// same way the original does.
+		MemoryBackend: src.MemoryBackend,
+		MemoryQmd:     src.MemoryQmd,
 		// Carry over placement/service config so the clone schedules and is
 		// reachable the same way the original is.
 		PodAnnotations:            src.PodAnnotations,
