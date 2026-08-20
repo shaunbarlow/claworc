@@ -7,7 +7,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// 00014_noop_instance_discord_config: registry placeholder for the
+// 00015_noop_instance_discord_config: registry placeholder for the
 // Instance.DiscordConfig column added for the per-agent Discord connection
 // feature (see docs/discord-connections.md).
 //
@@ -19,8 +19,11 @@ import (
 // registry contiguous.
 func init() {
 	register(&goose.Migration{
-		Version: 14,
-		Source:  "00014_noop_instance_discord_config.go",
+		// Version 15, not 14: the qmd-memory-backend branch (PR #3) took 14
+		// with 00014_noop_memory_qmd.go while this feature was in flight,
+		// and duplicate goose versions panic at init.
+		Version: 15,
+		Source:  "00015_noop_instance_discord_config.go",
 		UpFnContext: func(ctx context.Context, tx *sql.Tx) error {
 			return nil
 		},
