@@ -54,6 +54,32 @@ Claworc cannot create the Discord app itself. You need:
   answered. Claworc always renders `"allowlist"` for secure-by-default
   behavior.
 
+## DM policy
+
+`dm_policy` maps onto OpenClaw's `channels.discord.dmPolicy`:
+
+| `dm_policy` | Behavior |
+|---|---|
+| `""` / `"pairing"` | Default. An unknown user must complete a one-time pairing approval before the agent answers. |
+| `"allowlist"` | Only the users in `dm_allow_from` are answered, **with no pairing handshake**. Everyone else is ignored. |
+| `"open"` | Anyone who can DM the bot gets a response. |
+| `"disabled"` | DMs are ignored entirely. |
+
+`allowlist` is the option for "these specific people, no ceremony". The user
+IDs are rendered into `allowFrom`, the same field `open` fills with `"*"`:
+
+```json
+{ "dmPolicy": "allowlist", "allowFrom": ["111111111111111111"] }
+```
+
+IDs are raw numeric snowflakes (Developer Mode → right-click a user → Copy
+ID). A pasted mention (`<@123…>`, `<@!123…>`) is normalized down to the bare
+ID; a username is rejected, because it would silently fail to match. An empty
+`dm_allow_from` under `allowlist` is rejected too — it blocks every DM while
+reading as "some users are allowed", which is `disabled` under the wrong name.
+The list is preserved when you switch to another policy, so toggling in the UI
+does not discard it.
+
 Everything else matches Slack: structure in `Instance.DiscordConfig`
 (additive column, noop migration 00014), boot-time delivery via the reserved
 `OPENCLAW_INITIAL_DISCORD` env var applied by `svc-openclaw/run`
@@ -62,6 +88,10 @@ push + gateway restart for config-only edits, container restart for token
 changes, `GET/PUT /api/v1/instances/{id}/discord`, a `discord` object on
 instance create, the settings-tab card, and the create-form section. Clones
 carry no Discord connection.
+
+The token restart is not decided by "did the row change" — it is decided by
+`EnsureEnvPropagated`, which compares the live container's environment against
+what the database says it should be. See `docs/env-propagation.md`.
 
 ## Scope / deferred
 

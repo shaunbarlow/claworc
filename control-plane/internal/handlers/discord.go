@@ -42,8 +42,14 @@ type discordChannelRule struct {
 type instanceDiscordConfig struct {
 	Enabled  bool                 `json:"enabled"`
 	Channels []discordChannelRule `json:"channels"`
-	// DMPolicy: "" (OpenClaw default, pairing), "pairing", "open", "disabled".
+	// DMPolicy: "" (OpenClaw default, pairing), "pairing", "allowlist",
+	// "open", "disabled".
 	DMPolicy string `json:"dm_policy,omitempty"`
+	// DMAllowFrom is the set of Discord user IDs allowed to DM the agent
+	// under the "allowlist" policy: those users are let straight through with
+	// no pairing handshake, and everyone else is blocked. Ignored for every
+	// other policy.
+	DMAllowFrom []string `json:"dm_allow_from,omitempty"`
 }
 
 func parseDiscordConfig(raw string) (instanceDiscordConfig, bool) {
@@ -101,10 +107,41 @@ func validateDiscordConfig(cfg *instanceDiscordConfig) error {
 		normalized = append(normalized, rule)
 	}
 	cfg.Channels = normalized
+
+	// Normalize the DM allowlist regardless of policy so switching to
+	// "allowlist" and back does not silently corrupt a saved list. Users are
+	// commonly pasted as a mention (<@123>) rather than a bare ID.
+	allowFrom := make([]string, 0, len(cfg.DMAllowFrom))
+	seenUser := map[string]bool{}
+	for _, raw := range cfg.DMAllowFrom {
+		uid := strings.TrimSpace(raw)
+		uid = strings.TrimSuffix(strings.TrimPrefix(uid, "<@"), ">")
+		uid = strings.TrimPrefix(uid, "!") // <@!123> is the legacy nickname form
+		if uid == "" {
+			continue
+		}
+		if !discordSnowflakeRegex.MatchString(uid) {
+			return fmt.Errorf("invalid Discord user ID %q: use the numeric user ID, not the username", raw)
+		}
+		if seenUser[uid] {
+			continue
+		}
+		seenUser[uid] = true
+		allowFrom = append(allowFrom, uid)
+	}
+	cfg.DMAllowFrom = allowFrom
+
 	switch cfg.DMPolicy {
 	case "", "pairing", "open", "disabled":
+	case "allowlist":
+		// An empty allowlist would block every DM while reading in the UI as
+		// "specific users are allowed" -- that is "disabled" wearing the wrong
+		// label, so make the user say which one they meant.
+		if len(cfg.DMAllowFrom) == 0 {
+			return fmt.Errorf("dm_policy \"allowlist\" needs at least one Discord user ID (use \"disabled\" to block all DMs)")
+		}
 	default:
-		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, open, disabled", cfg.DMPolicy)
+		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, allowlist, open, disabled", cfg.DMPolicy)
 	}
 	return nil
 }
@@ -149,6 +186,12 @@ func renderDiscordChannelsJSON(cfg instanceDiscordConfig) (string, error) {
 			// OpenClaw requires an explicit wildcard sender allowlist for open DMs.
 			block["dmPolicy"] = "open"
 			block["allowFrom"] = []string{"*"}
+		case "allowlist":
+			// Named users are let through with no pairing handshake; everyone
+			// else is blocked. allowFrom carries the senders for this policy
+			// exactly as the "*" wildcard does for "open".
+			block["dmPolicy"] = "allowlist"
+			block["allowFrom"] = cfg.DMAllowFrom
 		case "pairing", "disabled":
 			block["dmPolicy"] = cfg.DMPolicy
 		}
@@ -230,6 +273,7 @@ type instanceDiscordResponse struct {
 	Enabled        bool                 `json:"enabled"`
 	Channels       []discordChannelRule `json:"channels"`
 	DMPolicy       string               `json:"dm_policy"`
+	DMAllowFrom    []string             `json:"dm_allow_from"`
 	HasBotToken    bool                 `json:"has_bot_token"`
 	BotTokenMasked string               `json:"bot_token_masked,omitempty"`
 	Restarting     bool                 `json:"restarting,omitempty"`
@@ -238,13 +282,17 @@ type instanceDiscordResponse struct {
 func discordResponseFor(inst database.Instance) instanceDiscordResponse {
 	cfg, configured := parseDiscordConfig(inst.DiscordConfig)
 	resp := instanceDiscordResponse{
-		Configured: configured,
-		Enabled:    cfg.Enabled,
-		Channels:   cfg.Channels,
-		DMPolicy:   cfg.DMPolicy,
+		Configured:  configured,
+		Enabled:     cfg.Enabled,
+		Channels:    cfg.Channels,
+		DMPolicy:    cfg.DMPolicy,
+		DMAllowFrom: cfg.DMAllowFrom,
 	}
 	if resp.Channels == nil {
 		resp.Channels = []discordChannelRule{}
+	}
+	if resp.DMAllowFrom == nil {
+		resp.DMAllowFrom = []string{}
 	}
 	// Token presence reflects what the container actually receives: global
 	// defaults merged with per-instance overrides.
@@ -267,9 +315,10 @@ func GetInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 }
 
 type instanceDiscordUpdateRequest struct {
-	Enabled  *bool                 `json:"enabled"`
-	Channels *[]discordChannelRule `json:"channels"`
-	DMPolicy *string               `json:"dm_policy"`
+	Enabled     *bool                 `json:"enabled"`
+	Channels    *[]discordChannelRule `json:"channels"`
+	DMPolicy    *string               `json:"dm_policy"`
+	DMAllowFrom *[]string             `json:"dm_allow_from"`
 	// Token: nil = keep current value, "" = remove, non-empty = set.
 	BotToken *string `json:"bot_token"`
 }
@@ -302,6 +351,9 @@ func UpdateInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DMPolicy != nil {
 		cfg.DMPolicy = *body.DMPolicy
+	}
+	if body.DMAllowFrom != nil {
+		cfg.DMAllowFrom = *body.DMAllowFrom
 	}
 	if cfg.Channels == nil {
 		cfg.Channels = []discordChannelRule{}
@@ -352,13 +404,19 @@ func UpdateInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 
 	resp := discordResponseFor(*inst)
 
-	// Propagate to the running container. A token change needs a container
-	// restart (env vars only apply at create); the boot script then
-	// re-applies channels.discord from OPENCLAW_INITIAL_DISCORD, so the SSH
-	// push is only needed for config-only edits.
-	if inst.Status == "running" {
-		if envVarsChanged {
-			restartInstanceAsync(*inst, callerID(r))
+	// Propagate to the running container. The bot token is an env var, and
+	// env vars only enter a container when its spec is built, so a token
+	// change needs a restart; the boot script then re-applies
+	// channels.discord from OPENCLAW_INITIAL_DISCORD, which makes the SSH
+	// push redundant in that case. A config-only edit is pushed live instead.
+	//
+	// The restart decision is EnsureEnvPropagated's, not envVarsChanged's: it
+	// diffs the live container env, so a token that was saved earlier but
+	// never reached the container (agent still provisioning, status column
+	// stale) heals here instead of being stuck behind a changed=false no-op
+	// forever. envVarsChanged only tells us whether to bother looking.
+	if envVarsChanged || configChanged {
+		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), discordBotTokenEnvVar) {
 			resp.Restarting = true
 		} else if configChanged {
 			if rendered := renderInitialDiscordEnv(*inst); rendered != "" {

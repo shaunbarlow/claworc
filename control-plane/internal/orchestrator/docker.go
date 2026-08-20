@@ -511,6 +511,28 @@ func (d *DockerOrchestrator) createContainer(ctx context.Context, params CreateP
 	return nil
 }
 
+// GetInstanceEnv returns the running container's environment. Config.Env also
+// carries whatever the image baked in, which Claworc does not own -- callers
+// compare only the keys they expect to be there rather than the whole map.
+func (d *DockerOrchestrator) GetInstanceEnv(ctx context.Context, name string) (map[string]string, error) {
+	inspect, err := d.client.ContainerInspect(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("inspect container %s: %w", name, err)
+	}
+	env := map[string]string{}
+	if inspect.Config == nil {
+		return env, nil
+	}
+	for _, kv := range inspect.Config.Env {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		env[k] = v
+	}
+	return env, nil
+}
+
 func (d *DockerOrchestrator) GetInstanceStatus(ctx context.Context, name string) (string, error) {
 	inspect, err := d.client.ContainerInspect(ctx, name)
 	if err != nil {

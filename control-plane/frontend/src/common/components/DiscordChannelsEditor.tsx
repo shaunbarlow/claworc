@@ -91,15 +91,26 @@ export default function DiscordChannelsEditor({ channels, onChange, disabled }: 
   );
 }
 
+/**
+ * DM access control. The "allowlist" policy names specific Discord users who
+ * are answered straight away with no pairing handshake, so its user list is
+ * part of the same control rather than a separate card — picking the policy
+ * without naming anyone would block every DM, which the API rejects.
+ */
 export function DiscordDMPolicySelect({
   value,
   onChange,
+  allowFrom,
+  onAllowFromChange,
   disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
+  allowFrom: string[];
+  onAllowFromChange: (users: string[]) => void;
   disabled?: boolean;
 }) {
+  const isAllowlist = value === "allowlist";
   return (
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-1">Direct messages</label>
@@ -110,9 +121,65 @@ export function DiscordDMPolicySelect({
         className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
       >
         <option value="">Pairing (default) — DMs require one-time approval</option>
+        <option value="allowlist">
+          Allowlist — only the listed users, answered without pairing
+        </option>
         <option value="open">Open — anyone who can DM the bot gets a response</option>
         <option value="disabled">Disabled — the agent ignores DMs</option>
       </select>
+
+      {isAllowlist && (
+        <div className="mt-2 pl-3 border-l-2 border-gray-200">
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-xs font-medium text-gray-700">Allowed users</label>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => onAllowFromChange([...allowFrom, ""])}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40"
+            >
+              <Plus size={12} />
+              Add user
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500 mb-2">
+            Use numeric user <span className="font-medium">IDs</span> (enable Developer Mode in
+            Discord, then right-click a user → Copy ID). These users skip pairing entirely;
+            everyone else is ignored.
+          </p>
+          {allowFrom.length === 0 ? (
+            <p className="text-xs text-amber-700">
+              No users listed — add at least one, or switch to Disabled to block all DMs.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {allowFrom.map((uid, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={uid}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      onAllowFromChange(allowFrom.map((u, i) => (i === idx ? e.target.value : u)))
+                    }
+                    placeholder="User ID, e.g. 123456789012345678"
+                    className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  />
+                  <button
+                    type="button"
+                    title="Remove user"
+                    disabled={disabled}
+                    onClick={() => onAllowFromChange(allowFrom.filter((_, i) => i !== idx))}
+                    className="p-1.5 text-gray-500 hover:text-red-600 disabled:opacity-40"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,10 @@ import (
 // sibling pods (agent <-> browser <-> copy pods). No-op on non-SELinux nodes.
 const seLinuxMCSLevel = "s0:c0,c0"
 
+// instanceContainerName is the agent container inside an instance pod. Named
+// so readers-back (GetInstanceEnv) and the spec builder cannot drift apart.
+const instanceContainerName = "claworc-instance"
+
 type KubernetesOrchestrator struct {
 	clientset       kubernetes.Interface
 	restConfig      *rest.Config
@@ -460,6 +464,41 @@ func (k *KubernetesOrchestrator) GetInstanceStatus(ctx context.Context, name str
 	default:
 		return "creating", nil
 	}
+}
+
+// GetInstanceEnv reads the env of the live pod rather than the Deployment's
+// pod template: the template is what we *asked* for, the pod is what the agent
+// process actually got. Reading the template would report success for a
+// deployment that was updated but whose rollout never completed.
+//
+// The Deployment uses the Recreate strategy, so there is only ever one pod to
+// pick from. Vars sourced via ValueFrom are skipped -- Claworc only ever sets
+// literal values, and a nil Value there would read as an empty string and look
+// like drift forever.
+func (k *KubernetesOrchestrator) GetInstanceEnv(ctx context.Context, name string) (map[string]string, error) {
+	pods, err := k.clientset.CoreV1().Pods(k.ns()).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app=%s", name),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return nil, fmt.Errorf("no pod found for instance %s", name)
+	}
+	for _, c := range pods.Items[0].Spec.Containers {
+		if c.Name != instanceContainerName {
+			continue
+		}
+		env := make(map[string]string, len(c.Env))
+		for _, e := range c.Env {
+			if e.ValueFrom != nil {
+				continue
+			}
+			env[e.Name] = e.Value
+		}
+		return env, nil
+	}
+	return nil, fmt.Errorf("container %s not found in pod for instance %s", instanceContainerName, name)
 }
 
 func (k *KubernetesOrchestrator) GetInstanceImageInfo(ctx context.Context, name string) (string, error) {
@@ -894,7 +933,7 @@ func buildDeployment(params CreateParams, ns string) *appsv1.Deployment {
 						FSGroupChangePolicy: &fsGroupPolicy,
 					},
 					Containers: []corev1.Container{{
-						Name:            "claworc-instance",
+						Name:            instanceContainerName,
 						Image:           params.ContainerImage,
 						ImagePullPolicy: corev1.PullAlways,
 						SecurityContext: &corev1.SecurityContext{Privileged: &privileged, AllowPrivilegeEscalation: &allowPrivEsc},

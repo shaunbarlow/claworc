@@ -20,6 +20,7 @@ export default function DiscordSection({ instanceId }: Props) {
   const [enabled, setEnabled] = useState(false);
   const [channels, setChannels] = useState<DiscordChannelRule[]>([]);
   const [dmPolicy, setDmPolicy] = useState("");
+  const [dmAllowFrom, setDmAllowFrom] = useState<string[]>([]);
   const [botToken, setBotToken] = useState("");
   const [dirty, setDirty] = useState(false);
 
@@ -28,6 +29,7 @@ export default function DiscordSection({ instanceId }: Props) {
     setEnabled(data.enabled);
     setChannels(data.channels);
     setDmPolicy(data.dm_policy ?? "");
+    setDmAllowFrom(data.dm_allow_from ?? []);
   }, [data, dirty]);
 
   const markDirty = () => setDirty(true);
@@ -37,6 +39,7 @@ export default function DiscordSection({ instanceId }: Props) {
       enabled,
       channels: channels.filter((c) => c.guild_id.trim() !== ""),
       dm_policy: dmPolicy,
+      dm_allow_from: dmAllowFrom.filter((u) => u.trim() !== ""),
     };
     // The token is only sent when the user typed one — an empty field means
     // "keep the current token" (remove via the Environment Variables card).
@@ -144,6 +147,11 @@ export default function DiscordSection({ instanceId }: Props) {
           disabled={!enabled}
           onChange={(v) => {
             setDmPolicy(v);
+            markDirty();
+          }}
+          allowFrom={dmAllowFrom}
+          onAllowFromChange={(users) => {
+            setDmAllowFrom(users);
             markDirty();
           }}
         />

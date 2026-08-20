@@ -179,6 +179,10 @@ func (m *mockOrchestrator) StopInstance(_ context.Context, _ string) error   { r
 func (m *mockOrchestrator) RestartInstance(_ context.Context, _ string, _ orchestrator.CreateParams) error {
 	return nil
 }
+func (m *mockOrchestrator) GetInstanceEnv(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (m *mockOrchestrator) GetInstanceStatus(_ context.Context, _ string) (string, error) {
 	return "running", nil
 }

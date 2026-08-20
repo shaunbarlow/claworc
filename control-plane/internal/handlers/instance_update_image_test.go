@@ -40,6 +40,10 @@ func (m *updateImageMock) UpdateImage(_ context.Context, _ string, _ orchestrato
 	return m.updateImageErr
 }
 
+func (m *updateImageMock) GetInstanceEnv(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (m *updateImageMock) GetInstanceStatus(_ context.Context, _ string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

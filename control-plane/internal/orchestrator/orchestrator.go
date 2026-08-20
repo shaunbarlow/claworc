@@ -21,6 +21,12 @@ type ContainerOrchestrator interface {
 	RestartInstance(ctx context.Context, name string, params CreateParams) error
 	GetInstanceStatus(ctx context.Context, name string) (string, error)
 	GetInstanceImageInfo(ctx context.Context, name string) (string, error)
+	// GetInstanceEnv returns the environment the workload is actually running
+	// with (K8s: the live pod's container env; Docker: the container's
+	// Config.Env). Env vars only enter a container when its spec is built, so
+	// without a way to read back what landed there is no way to tell a
+	// successful propagation from a missed one -- see EnsureEnvPropagated.
+	GetInstanceEnv(ctx context.Context, name string) (map[string]string, error)
 
 	// Config
 	UpdateInstanceConfig(ctx context.Context, name string, configJSON string) error

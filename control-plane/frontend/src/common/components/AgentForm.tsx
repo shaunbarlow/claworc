@@ -147,6 +147,7 @@ export default function AgentForm({
   const [discordBotToken, setDiscordBotToken] = useState("");
   const [discordChannels, setDiscordChannels] = useState<DiscordChannelRule[]>([]);
   const [discordDmPolicy, setDiscordDmPolicy] = useState("");
+  const [discordDmAllowFrom, setDiscordDmAllowFrom] = useState<string[]>([]);
 
   const [showNoModelsWarning, setShowNoModelsWarning] = useState(false);
 
@@ -212,6 +213,7 @@ export default function AgentForm({
         enabled: true,
         channels: discordChannels.filter((c) => c.guild_id.trim() !== ""),
         dm_policy: discordDmPolicy || undefined,
+        dm_allow_from: discordDmAllowFrom.filter((u) => u.trim() !== ""),
         bot_token: discordBotToken.trim() || undefined,
       };
     }
@@ -523,7 +525,12 @@ export default function AgentForm({
                 </p>
               )}
               <DiscordChannelsEditor channels={discordChannels} onChange={setDiscordChannels} />
-              <DiscordDMPolicySelect value={discordDmPolicy} onChange={setDiscordDmPolicy} />
+              <DiscordDMPolicySelect
+                value={discordDmPolicy}
+                onChange={setDiscordDmPolicy}
+                allowFrom={discordDmAllowFrom}
+                onAllowFromChange={setDiscordDmAllowFrom}
+              />
             </>
           )}
         </div>

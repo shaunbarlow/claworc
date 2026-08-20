@@ -52,6 +52,10 @@ func (mockOps) StopInstance(_ context.Context, _ string) error                  
 func (mockOps) RestartInstance(_ context.Context, _ string, _ orchestrator.CreateParams) error {
 	return nil
 }
+func (mockOps) GetInstanceEnv(_ context.Context, _ string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (mockOps) GetInstanceStatus(_ context.Context, _ string) (string, error)    { return "running", nil }
 func (mockOps) GetInstanceImageInfo(_ context.Context, _ string) (string, error) { return "", nil }
 func (mockOps) UpdateInstanceConfig(_ context.Context, _ string, _ string) error { return nil }

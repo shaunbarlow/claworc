@@ -663,11 +663,23 @@ func restartInstanceAsync(inst database.Instance, userID uint) {
 // caller customize the toast title and description. Used by flows that
 // trigger a restart as a side effect (e.g. shared-folder mount changes).
 func restartInstanceAsyncWithToast(inst database.Instance, userID uint, title, message string) {
-	if inst.Status != "running" {
-		return
-	}
 	orch := orchestrator.Get()
 	if orch == nil {
+		return
+	}
+	// Gate on the live container status, never on the status column. The
+	// column lags reality: it sits at "creating" for the whole provisioning
+	// window, and enrichStatus only ever writes a status back when leaving
+	// "restarting" -- a row left at "stopped"/"error" in front of a healthy
+	// pod stays that way indefinitely. A raw-column check therefore drops
+	// restarts for instances that are genuinely up, silently, which is how an
+	// env var saved just after create could never reach its container. Same
+	// reasoning as the tunnel reconciler, which deliberately accepts
+	// "restarting"/"error" rows (see StartBackgroundManager in main.go).
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), envPropagationTimeout)
+	live, err := orch.GetInstanceStatus(statusCtx, inst.Name)
+	cancelStatus()
+	if err != nil || live != "running" {
 		return
 	}
 
@@ -1196,11 +1208,6 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	effectiveImage := getEffectiveImage(inst)
-	effectiveResolution := getEffectiveResolution(inst)
-	effectiveTimezone := getEffectiveTimezone(inst)
-	effectiveUserAgent := getEffectiveUserAgent(inst)
-
 	// Pre-create virtual keys so we can pass initial config to the container.
 	// This eliminates the race where messages arrive before providers are configured.
 	allIDs := allProviderIDsForInstance(inst.ID, enabledProviders)
@@ -1225,8 +1232,11 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	initialProvidersJSON, _ := buildOpenClawProvidersJSON(models, gatewayProviders, config.Cfg.LLMGatewayPort)
 
-	// Launch container creation asynchronously (image pull can take minutes)
-	startInstanceTask(taskmanager.TaskInstanceCreate, inst.ID, callerID(r), inst.DisplayName,
+	// Launch container creation asynchronously (image pull can take minutes).
+	// callerID is read here, not inside the closure: r is not safe to touch
+	// once the request has been answered.
+	creatorID := callerID(r)
+	startInstanceTask(taskmanager.TaskInstanceCreate, inst.ID, creatorID, inst.DisplayName,
 		fmt.Sprintf("Creating instance %s", inst.DisplayName),
 		func(ctx context.Context) {
 			orch := orchestrator.Get()
@@ -1236,59 +1246,41 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			envVars := map[string]string{}
-
-			// User-defined env vars (global defaults overridden by per-instance values).
-			// Applied first so reserved system names below can never be shadowed.
-			MergeUserEnvVars(envVars, LoadGlobalEnvVars(), LoadInstanceEnvVars(inst))
-
-			// System env vars — reserved, always win over user values
-			if gatewayTokenPlain != "" {
-				envVars["OPENCLAW_GATEWAY_TOKEN"] = gatewayTokenPlain
+			// Re-read the row before building the spec. This closure captured
+			// inst by value when the task was queued, and provisioning takes
+			// as long as an image pull -- anything written in that window (a
+			// Discord/Slack token, an env var, a placement edit) would
+			// otherwise be built into a container that never sees it, while
+			// the write itself found the row still at status "creating" and
+			// skipped its own propagation. The database is the source of
+			// truth for the spec; the captured copy is only a starting point.
+			fresh := inst
+			if err := database.DB.First(&fresh, inst.ID).Error; err != nil {
+				log.Printf("Failed to re-read instance %d before provisioning, using the captured row: %s",
+					inst.ID, utils.SanitizeForLog(err.Error()))
+				fresh = inst
 			}
-			envVars["CLAWORC_INSTANCE_ID"] = fmt.Sprintf("%d", inst.ID)
+
+			// buildCreateParams is the single source of truth for CreateParams
+			// (it merges global + per-instance env vars, then applies the
+			// reserved system vars). The inline literal this replaced had
+			// already drifted from it once - see the comment on
+			// instancePlacementFields.
+			params := buildCreateParams(fresh)
+			if gatewayTokenPlain != "" {
+				params.EnvVars["OPENCLAW_GATEWAY_TOKEN"] = gatewayTokenPlain
+			}
+			// Models/providers are resolved outside buildCreateParams because
+			// they depend on the LLM gateway keys minted just above.
 			if initialModelsJSON != "" {
-				envVars["OPENCLAW_INITIAL_MODELS"] = initialModelsJSON
+				params.EnvVars["OPENCLAW_INITIAL_MODELS"] = initialModelsJSON
 			}
 			if initialProvidersJSON != "" {
-				envVars["OPENCLAW_INITIAL_PROVIDERS"] = initialProvidersJSON
+				params.EnvVars["OPENCLAW_INITIAL_PROVIDERS"] = initialProvidersJSON
 			}
-			if slackEnv := renderInitialSlackEnv(inst); slackEnv != "" {
-				envVars["OPENCLAW_INITIAL_SLACK"] = slackEnv
-			}
-			if discordEnv := renderInitialDiscordEnv(inst); discordEnv != "" {
-				envVars["OPENCLAW_INITIAL_DISCORD"] = discordEnv
-			}
+			params.OnProgress = func(msg string) { setStatusMessage(inst.ID, msg) }
 
-			// inst was just Create()'d above with PodAnnotations/NodeSelector/
-			// Tolerations/Affinity/ServiceAccountAnnotations/Ports already
-			// resolved (see resolvePlacementDefaults/resolveServiceDefaults in
-			// CreateInstance) - decode them so this, the pod's actual first
-			// creation, honors them instead of silently starting with none
-			// and only picking them up on a later UpdateInstance/restart.
-			placement := instancePlacementParams(inst)
-
-			err := orch.CreateInstance(ctx, orchestrator.CreateParams{
-				Name:                      name,
-				CPURequest:                body.CPURequest,
-				CPULimit:                  body.CPULimit,
-				MemoryRequest:             body.MemoryRequest,
-				MemoryLimit:               body.MemoryLimit,
-				StorageHomebrew:           body.StorageHomebrew,
-				StorageHome:               body.StorageHome,
-				ContainerImage:            effectiveImage,
-				VNCResolution:             effectiveResolution,
-				Timezone:                  effectiveTimezone,
-				UserAgent:                 effectiveUserAgent,
-				EnvVars:                   envVars,
-				PodAnnotations:            placement.PodAnnotations,
-				NodeSelector:              placement.NodeSelector,
-				Tolerations:               placement.Tolerations,
-				Affinity:                  inst.Affinity,
-				ServiceAccountAnnotations: placement.ServiceAccountAnnotations,
-				Ports:                     placement.Ports,
-				OnProgress:                func(msg string) { setStatusMessage(inst.ID, msg) },
-			})
+			err := orch.CreateInstance(ctx, params)
 			if err != nil {
 				log.Printf("Failed to create container resources for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(err.Error()))
 				setStatusMessage(inst.ID, fmt.Sprintf("Failed: %v", err))
@@ -1320,6 +1312,17 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			// shared-folder index paths) so first boot matches the resolved
 			// defaults + overrides.
 			applyMemoryConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, buildMemoryConfig(&inst))
+
+			// Final catch for the provisioning window. Everything written to
+			// the row before the spec was built is already in the container
+			// (see the re-read above), but a save that landed *between* the
+			// spec build and now found the instance mid-create and skipped its
+			// own propagation. SSH is up by this point, so the pod is ready
+			// and a drift check is meaningful; it no-ops when nothing was
+			// missed, which is the common case.
+			if EnsureEnvPropagated(ctx, inst, creatorID) {
+				log.Printf("Instance %d: restarting to apply env vars saved during provisioning", inst.ID)
+			}
 		})
 
 	var totalInstances int64
@@ -1766,13 +1769,23 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 
 	status := resolveStatus(&inst, orchStatus)
 	// Auto-restart so the new env vars are injected into the container.
-	// buildCreateParams (evaluated inside restartInstanceAsync's goroutine)
-	// re-reads EnvVars from the DB, so it picks up what we just wrote.
+	// EnsureEnvPropagated re-derives the desired env from inst (GORM wrote the
+	// new env_vars back onto the struct above) and compares it against what
+	// the container actually has, so this also recovers an earlier save that
+	// never made it in -- re-saving the same value reports changed=false and
+	// would otherwise be a permanent no-op. Unset keys are passed as touched
+	// names because a removal leaves no trace in the desired map.
 	restarting := false
-	if envVarsChanged && status == "running" {
-		restartInstanceAsync(inst, callerID(r))
-		restarting = true
-		status = "restarting"
+	if envVarsChanged {
+		touched := make([]string, 0, len(body.EnvVarsSet)+len(body.EnvVarsUnset))
+		for name := range body.EnvVarsSet {
+			touched = append(touched, name)
+		}
+		touched = append(touched, body.EnvVarsUnset...)
+		if EnsureEnvPropagated(r.Context(), inst, callerID(r), touched...) {
+			restarting = true
+			status = "restarting"
+		}
 	}
 
 	resp := instanceToResponse(inst, status)
@@ -2024,7 +2037,14 @@ func StartInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if orch := orchestrator.Get(); orch != nil {
-		if err := orch.StartInstance(r.Context(), inst.Name); err != nil {
+		// Rebuild the spec from the database instead of just scaling the
+		// existing workload back up. Env vars are only ever injected when a
+		// spec is built, so a bare start resurrects the container with
+		// whatever env it had when it was stopped and silently ignores
+		// anything saved while it was down. RestartInstance is the same call
+		// the manual restart button makes; on both backends it is safe
+		// against an already-stopped workload.
+		if err := orch.RestartInstance(r.Context(), inst.Name, buildCreateParams(inst)); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to start instance: %v", err))
 			return
 		}

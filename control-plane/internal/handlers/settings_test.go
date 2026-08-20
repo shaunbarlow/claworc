@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gluk-w/claworc/control-plane/internal/database"
+	"github.com/gluk-w/claworc/control-plane/internal/orchestrator"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 )
 
@@ -203,19 +206,71 @@ func TestUpdateSettings_DefaultModels(t *testing.T) {
 	}
 }
 
-// TestUpdateSettings_EnvVars_RestartsRunningInstances verifies that env var
-// changes trigger restart of every running instance and that the response
-// reports each one. The orchestrator is not initialized in this test, so
-// restartInstanceAsync no-ops internally — but the response listing is still
-// built from the DB query and is what we assert on.
+// envDriftOrch reports per-instance container status and env, so a test can
+// express what EnsureEnvPropagated is supposed to key off: the live container,
+// not the status column.
+type envDriftOrch struct {
+	mockOrchestrator
+	statusByName map[string]string
+	envByName    map[string]map[string]string
+}
+
+func (m *envDriftOrch) GetInstanceStatus(_ context.Context, name string) (string, error) {
+	if s, ok := m.statusByName[name]; ok {
+		return s, nil
+	}
+	return "stopped", nil
+}
+
+func (m *envDriftOrch) GetInstanceEnv(_ context.Context, name string) (map[string]string, error) {
+	if e, ok := m.envByName[name]; ok {
+		return e, nil
+	}
+	return map[string]string{}, nil
+}
+
+// TestUpdateSettings_EnvVars_RestartsRunningInstances verifies that a global
+// env var change restarts exactly the instances whose containers are actually
+// missing it, and that the response reports those and only those.
+//
+// The three instances cover the cases that used to be handled wrongly:
+// alpha is live and lacks the var (restart); beta is live and already has it,
+// e.g. from an earlier pass (no restart, no needless bounce); gamma's row says
+// "running" but its container is not, so there is nothing to propagate into.
+// Note that gamma is also the shape that used to be *missed* in reverse -- a
+// stale row in front of a healthy pod -- which is why the query behind this is
+// no longer filtered by status.
 func TestUpdateSettings_EnvVars_RestartsRunningInstances(t *testing.T) {
 	setupSettingsTest(t)
 
-	// Two running + one stopped instance — only the running ones should appear
-	// in the restart list.
-	database.DB.Create(&database.Instance{Name: "bot-alpha", DisplayName: "Alpha", Status: "running"})
-	database.DB.Create(&database.Instance{Name: "bot-beta", DisplayName: "Beta", Status: "running"})
-	database.DB.Create(&database.Instance{Name: "bot-gamma", DisplayName: "Gamma", Status: "stopped"})
+	alpha := database.Instance{Name: "bot-alpha", DisplayName: "Alpha", Status: "running"}
+	beta := database.Instance{Name: "bot-beta", DisplayName: "Beta", Status: "running"}
+	gamma := database.Instance{Name: "bot-gamma", DisplayName: "Gamma", Status: "running"}
+	database.DB.Create(&alpha)
+	database.DB.Create(&beta)
+	database.DB.Create(&gamma)
+
+	// CLAWORC_INSTANCE_ID is injected into every container by
+	// buildCreateParams, so a container that is genuinely up to date has it
+	// too -- omitting it here would make every instance look like drift and
+	// quietly turn the "no needless bounce" assertion into a no-op.
+	upToDate := map[string]string{
+		"MYVAR":               "hello",
+		"CLAWORC_INSTANCE_ID": fmt.Sprintf("%d", beta.ID),
+	}
+
+	orchestrator.Set(&envDriftOrch{
+		statusByName: map[string]string{
+			"bot-alpha": "running",
+			"bot-beta":  "running",
+			"bot-gamma": "stopped",
+		},
+		envByName: map[string]map[string]string{
+			"bot-alpha": {"CLAWORC_INSTANCE_ID": fmt.Sprintf("%d", alpha.ID)},
+			"bot-beta":  upToDate,
+		},
+	})
+	t.Cleanup(func() { orchestrator.Set(nil) })
 
 	body := `{"env_vars_set":{"MYVAR":"hello"}}`
 	req := httptest.NewRequest("POST", "/api/v1/settings", strings.NewReader(body))
@@ -237,8 +292,8 @@ func TestUpdateSettings_EnvVars_RestartsRunningInstances(t *testing.T) {
 	if !ok {
 		t.Fatalf("restarting_instances missing or wrong type: %T %v", resp["restarting_instances"], resp["restarting_instances"])
 	}
-	if len(restarting) != 2 {
-		t.Fatalf("restarting_instances len = %d, want 2 (running only)", len(restarting))
+	if len(restarting) != 1 {
+		t.Fatalf("restarting_instances len = %d, want 1 (only the live instance missing the var)", len(restarting))
 	}
 	names := map[string]bool{}
 	for _, item := range restarting {
@@ -247,11 +302,14 @@ func TestUpdateSettings_EnvVars_RestartsRunningInstances(t *testing.T) {
 			names[name] = true
 		}
 	}
-	if !names["bot-alpha"] || !names["bot-beta"] {
-		t.Errorf("expected bot-alpha and bot-beta, got %v", names)
+	if !names["bot-alpha"] {
+		t.Errorf("expected bot-alpha (live, missing the var), got %v", names)
+	}
+	if names["bot-beta"] {
+		t.Error("an instance that already has the value must not be bounced")
 	}
 	if names["bot-gamma"] {
-		t.Error("stopped instance should not be in the restart list")
+		t.Error("an instance whose container is not live has nothing to propagate into")
 	}
 
 	// The env var should also have been persisted.

@@ -300,19 +300,35 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-restart every currently-running instance so the new global env vars
-	// take effect. The container only injects env vars on (re)create, so without
+	// Auto-restart every instance whose container is missing the new global
+	// env vars. The container only injects env vars on (re)create, so without
 	// this the DB and the live containers silently diverge.
+	//
+	// Deliberately not filtered by `status = 'running'`: the status column
+	// lags reality, and an instance whose row is stale is exactly the one that
+	// missed a previous cascade and most needs this one. EnsureEnvPropagated
+	// checks the live container itself, skips anything that is not actually
+	// up, and restarts only on real drift -- so an instance that already has
+	// the values (per-instance override, or caught by an earlier pass) is left
+	// alone rather than needlessly bounced.
 	var restartingInstances []restartTarget
 	if envVarsChanged {
-		var running []database.Instance
-		database.DB.Where("status = ?", "running").Find(&running)
-		for i := range running {
-			restartInstanceAsync(running[i], callerID(r))
+		touched := make([]string, 0, len(envSet)+len(envUnset))
+		for name := range envSet {
+			touched = append(touched, name)
+		}
+		touched = append(touched, envUnset...)
+
+		var instances []database.Instance
+		database.DB.Find(&instances)
+		for i := range instances {
+			if !EnsureEnvPropagated(r.Context(), instances[i], callerID(r), touched...) {
+				continue
+			}
 			restartingInstances = append(restartingInstances, restartTarget{
-				ID:          running[i].ID,
-				Name:        running[i].Name,
-				DisplayName: running[i].DisplayName,
+				ID:          instances[i].ID,
+				Name:        instances[i].Name,
+				DisplayName: instances[i].DisplayName,
 			})
 		}
 	}

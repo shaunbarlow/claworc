@@ -352,13 +352,12 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 
 	resp := slackResponseFor(*inst)
 
-	// Propagate to the running container. Token changes need a container
-	// restart (env vars only apply at create); the boot script then
-	// re-applies channels.slack from OPENCLAW_INITIAL_SLACK, so the SSH push
-	// is only needed for config-only edits.
-	if inst.Status == "running" {
-		if envVarsChanged {
-			restartInstanceAsync(*inst, callerID(r))
+	// Propagate to the running container -- same contract as Discord above:
+	// EnsureEnvPropagated diffs the live container env rather than trusting
+	// envVarsChanged, so a token saved while the agent was still provisioning
+	// is recovered on the next save instead of needing a manual restart.
+	if envVarsChanged || configChanged {
+		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), slackBotTokenEnvVar, slackAppTokenEnvVar) {
 			resp.Restarting = true
 		} else if configChanged {
 			if rendered := renderInitialSlackEnv(*inst); rendered != "" {
