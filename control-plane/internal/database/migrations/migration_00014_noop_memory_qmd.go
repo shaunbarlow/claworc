@@ -7,7 +7,7 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// 00013_noop_memory_qmd: registry placeholder for the Instance.MemoryBackend /
+// 00014_noop_memory_qmd: registry placeholder for the Instance.MemoryBackend /
 // Instance.MemoryQmd columns and the SharedFolder.QmdIndex / QmdPattern
 // columns added for the configurable QMD memory backend feature.
 //
@@ -19,8 +19,8 @@ import (
 // registry contiguous.
 func init() {
 	register(&goose.Migration{
-		Version: 13,
-		Source:  "00013_noop_memory_qmd.go",
+		Version: 14,
+		Source:  "00014_noop_memory_qmd.go",
 		UpFnContext: func(ctx context.Context, tx *sql.Tx) error {
 			return nil
 		},

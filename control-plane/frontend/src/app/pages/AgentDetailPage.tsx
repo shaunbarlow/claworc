@@ -56,6 +56,7 @@ import AffinityEditor from "@common/components/AffinityEditor";
 import PortsEditor from "@common/components/PortsEditor";
 import { useHealth } from "@common/hooks/useHealth";
 import WebhookSection from "@common/components/WebhookSection";
+import SlackSection from "@common/components/SlackSection";
 import LegacyBrowserBanner from "@common/components/LegacyBrowserBanner";
 import AppToast from "@common/components/AppToast";
 import { infoToast, successToast, errorToast } from "@common/utils/toast";
@@ -1239,6 +1240,9 @@ export default function AgentDetailPage() {
               )}
             </div>
           )}
+
+          {/* Slack connection (per-instance) — admins and team managers */}
+          <SlackSection instanceId={instanceId} />
 
           {/* Webhook (per-instance) — admins and team managers */}
           <WebhookSection instanceId={instanceId} />

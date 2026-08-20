@@ -121,10 +121,18 @@ type Instance struct {
 	MemoryBackend string `gorm:"default:''" json:"memory_backend"`
 	// MemoryQmd is a JSON MemoryQmdSettings override object merged on top of
 	// the global default_memory_qmd setting (field-wise; instance wins).
-	MemoryQmd     string    `gorm:"type:text;default:'{}'" json:"-"`
-	TeamID        uint      `gorm:"not null;default:1;index" json:"team_id"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	MemoryQmd string `gorm:"type:text;default:'{}'" json:"-"`
+	// SlackConfig holds the structured per-instance Slack connection settings
+	// (enabled flag, channel allowlist, DM policy) as JSON. It is rendered
+	// into the agent's OpenClaw `channels.slack` config block at boot via the
+	// OPENCLAW_INITIAL_SLACK env var and pushed over SSH on edit. Tokens are
+	// NOT stored here — they live in EnvVars as SLACK_BOT_TOKEN /
+	// SLACK_APP_TOKEN so OpenClaw's env fallback picks them up and no
+	// plaintext token ever lands in the config file. Empty = never configured.
+	SlackConfig string    `gorm:"type:text;default:''" json:"-"`
+	TeamID      uint      `gorm:"not null;default:1;index" json:"team_id"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Team groups instances and users together. A "Default Team" is seeded
