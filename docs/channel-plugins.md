@@ -4,22 +4,66 @@ Every chat channel in OpenClaw is driven by a plugin. This documents how that
 plugin comes to be running in an agent, and what Claworc does and does not do
 about it.
 
-## Nothing needs installing
+## Slack and Discord are not part of OpenClaw
 
-`extensions/slack` and `extensions/discord` ship **inside** the OpenClaw npm
-package — its `package.json` `files` list includes `extensions/`. The agent
-image installs OpenClaw globally (`agent/instance/Dockerfile`), so both land at
-`$(npm root -g)/openclaw/extensions/`, and `resolveBundledPluginsDir()` finds
-them by walking up from its own module. They are discovered with
-`origin: "bundled"`.
+They used to be. Both shipped inside the openclaw npm package until they were
+split into separate `@openclaw/<channel>` packages — Discord around host
+`2026.4.10`, Slack around `2026.5.12-beta.1`, per the `minHostVersion` fields
+in OpenClaw's own catalog.
 
-There is no `openclaw plugins install` step, and Claworc does not perform one.
+The published tarball now **excludes them by name**. Its `files` list carries
+`!dist/extensions/discord/**` and `!dist/extensions/slack/**` alongside ~70
+other stripped extensions. They are not dependencies either — openclaw depends
+only on `@openclaw/ai`, `@openclaw/fs-safe` and `@openclaw/proxyline` — and the
+package's postinstall says so outright: *"Plugin package dependencies are
+installed only by explicit plugin install/update flows, never postinstall."*
 
-## Enabling is automatic
+Verify against the artifact, never the repo. A local openclaw checkout can be
+months behind the published package, and its `package.json` will still list
+`extensions/` under `files`:
+
+```bash
+npm view openclaw@latest dist.tarball        # then download and inspect
+tar tzf openclaw-*.tgz | grep 'dist/extensions/' | cut -d/ -f4 | sort -u
+```
+
+Plenty of channels *are* still bundled — `telegram`, `imessage`, `memory-core`,
+`browser` and around 65 others live in `dist/extensions/`. The split is
+partial, which is exactly what makes "it ships with OpenClaw" a plausible and
+wrong assumption.
+
+### How Claworc installs them
+
+The agent image only runs `npm install -g openclaw`, so a fresh agent has
+neither plugin. `EnsureChannelPluginInstalled` fills the gap: when a channel is
+enabled — on a settings save or at create time — Claworc installs the package
+on the agent over SSH and restarts the gateway.
+
+Auto-enable cannot substitute for this. `applyPluginAutoEnable` only flips
+`plugins.entries.<id>.enabled` for plugins OpenClaw *discovered*, and an
+uninstalled plugin is never discovered.
+
+The install is asynchronous and best-effort by design:
+
+- It is an npm install inside the pod, needing registry egress, and can take
+  minutes — so it must never sit on the request path.
+- It runs only when the readback confirms the plugin is **missing**. An agent
+  that could not be asked (`unknown`) is left alone: that is not evidence of
+  absence, and acting on it would mean an npm install every time an agent was
+  briefly unreachable. A `disabled` plugin is left alone too — that is a config
+  decision reinstalling would not change.
+- Duplicate installs for the same instance and channel are dropped, not
+  queued.
+- It waits up to three minutes for SSH, because the same save may have just
+  triggered a container restart for a token change.
+
+Outcome is reported by the readback on the next card load, not by the save.
+
+## Enabling is automatic (once installed)
 
 At **every gateway start**, OpenClaw calls `applyPluginAutoEnable`, which sets
-`plugins.entries.<id>.enabled = true` for any plugin whose channel looks
-configured. For our two channels that means:
+`plugins.entries.<id>.enabled = true` for any *discovered* plugin whose channel
+looks configured. For our two channels that means:
 
 - **Discord** — `DISCORD_BOT_TOKEN` in the environment, *or* a non-empty
   `channels.discord` block.
@@ -58,9 +102,11 @@ enable a plugin, in this order:
 the listed ids load — every other plugin, including other channels and
 `memory-core`, is refused with `not in allowlist`.
 
-Nothing in OpenClaw ever *creates* that array. Both writers
-(`ensureAllowlisted` in `plugin-auto-enable.ts` and in `plugins/enable.ts`)
-append only when it already exists:
+Nothing in OpenClaw ever *creates* that array. All three writers —
+`ensurePluginAllowlisted` (auto-enable), the copy in `plugins/enable.ts`, and
+`addInstalledPluginToAllowlist` (the install flow) — append only when it
+already exists, and the install-flow one additionally requires it to be
+non-empty:
 
 ```ts
 if (!Array.isArray(allow) || allow.includes(pluginId)) return cfg;
@@ -98,7 +144,7 @@ object read off the agent via `openclaw plugins list --json`:
 | `loaded` | Running; the channel can work. |
 | `disabled` | Present but not running. `detail` carries OpenClaw's reason from the table above — that string is the whole diagnostic. |
 | `error` | Present but failed to load; `detail` carries the reason. |
-| `missing` | Not in the agent at all. Points at the agent image, not at these settings. |
+| `missing` | Not installed on the agent. Enabling the channel triggers the background install described above. |
 | `unknown` | The agent could not be asked. Says nothing about health. |
 
 Design constraints worth preserving:

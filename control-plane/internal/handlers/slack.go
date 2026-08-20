@@ -428,6 +428,12 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	// EnsureEnvPropagated diffs the live container env rather than trusting
 	// envVarsChanged, so a token saved while the agent was still provisioning
 	// is recovered on the next save instead of needing a manual restart.
+	// Same as Discord: the Slack plugin ships separately from OpenClaw now, so
+	// enabling the channel installs it on the agent if it is absent.
+	if cfg.Enabled {
+		EnsureChannelPluginInstalled(inst.ID, inst.Name, "slack")
+	}
+
 	if envVarsChanged || configChanged {
 		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), slackBotTokenEnvVar, slackAppTokenEnvVar) {
 			resp.Restarting = true

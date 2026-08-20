@@ -1323,6 +1323,18 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			if EnsureEnvPropagated(ctx, inst, creatorID) {
 				log.Printf("Instance %d: restarting to apply env vars saved during provisioning", inst.ID)
 			}
+
+			// Channels configured at create time need their plugin on the
+			// agent: Slack and Discord ship as separate npm packages that the
+			// agent image does not install (see docs/channel-plugins.md).
+			// Both calls no-op when the channel is off or the plugin is
+			// already present.
+			if cfg, ok := parseSlackConfig(inst.SlackConfig); ok && cfg.Enabled {
+				EnsureChannelPluginInstalled(inst.ID, inst.Name, "slack")
+			}
+			if cfg, ok := parseDiscordConfig(inst.DiscordConfig); ok && cfg.Enabled {
+				EnsureChannelPluginInstalled(inst.ID, inst.Name, "discord")
+			}
 		})
 
 	var totalInstances int64

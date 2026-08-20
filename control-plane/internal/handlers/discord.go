@@ -429,6 +429,15 @@ func UpdateInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 	// never reached the container (agent still provisioning, status column
 	// stale) heals here instead of being stuck behind a changed=false no-op
 	// forever. envVarsChanged only tells us whether to bother looking.
+	// Discord's plugin is not part of OpenClaw any more, so enabling the
+	// channel has to put it on the agent first -- auto-enable cannot enable
+	// something that was never discovered. Async and best-effort: it is an npm
+	// install inside the pod, and the readback on the next card load reports
+	// how it went.
+	if cfg.Enabled {
+		EnsureChannelPluginInstalled(inst.ID, inst.Name, "discord")
+	}
+
 	if envVarsChanged || configChanged {
 		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), discordBotTokenEnvVar) {
 			resp.Restarting = true

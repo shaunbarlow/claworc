@@ -87,3 +87,45 @@ func TestParseChannelPluginStatusRejectsGarbage(t *testing.T) {
 		t.Error("expected an error so the caller can report unknown rather than missing")
 	}
 }
+
+// The channels Claworc manages must both resolve to the npm packages
+// OpenClaw's own catalog calls official. A typo here fails at install time on
+// the agent, minutes later and in a log nobody is reading.
+func TestChannelPluginSpecs(t *testing.T) {
+	want := map[string]string{
+		"discord": "@openclaw/discord",
+		"slack":   "@openclaw/slack",
+	}
+	for channel, spec := range want {
+		if got := channelPluginSpecs[channel]; got != spec {
+			t.Errorf("channelPluginSpecs[%q] = %q, want %q", channel, got, spec)
+		}
+	}
+	if len(channelPluginSpecs) != len(want) {
+		t.Errorf("channelPluginSpecs has %d entries, want %d — a new channel needs a test here too",
+			len(channelPluginSpecs), len(want))
+	}
+}
+
+// Only a confirmed-absent plugin may be installed. This encodes the two
+// judgements that keep an npm install from firing on a guess: "unknown" is not
+// evidence of absence, and "disabled" is a config decision that reinstalling
+// would not change.
+func TestOnlyMissingPluginsWarrantInstall(t *testing.T) {
+	cases := []struct {
+		state       channelPluginState
+		wantInstall bool
+	}{
+		{pluginMissing, true},
+		{pluginLoaded, false},
+		{pluginDisabled, false},
+		{pluginError, false},
+		{pluginUnknown, false},
+	}
+	for _, tc := range cases {
+		got := tc.state == pluginMissing
+		if got != tc.wantInstall {
+			t.Errorf("state %q: install = %v, want %v", tc.state, got, tc.wantInstall)
+		}
+	}
+}

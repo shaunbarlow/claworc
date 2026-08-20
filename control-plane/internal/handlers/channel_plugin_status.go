@@ -9,20 +9,29 @@ import (
 
 	"github.com/gluk-w/claworc/control-plane/internal/sshproxy"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
+	gossh "golang.org/x/crypto/ssh"
 )
 
-// Nothing has to be installed for a channel to work. Both extensions ship
-// inside the openclaw npm package the agent image installs globally, and
-// OpenClaw enables them for itself: at every gateway start
-// applyPluginAutoEnable turns on any plugin whose channel looks configured,
-// which for Slack and Discord means either the token env var or a non-empty
-// channels.<id> block -- Claworc writes both.
+// Slack and Discord are no longer part of OpenClaw. They used to ship inside
+// the npm package, but were split into separate @openclaw/<channel> packages
+// (Discord around host 2026.4.10, Slack around 2026.5.12) and are now excluded
+// from the published tarball by name. The agent image only runs
+// `npm install -g openclaw`, and the package's postinstall deliberately
+// installs no plugin packages, so a fresh agent has neither.
 //
-// What was missing is the readback. Enabling a channel was a write we never
-// confirmed, so a plugin that failed to load left the settings card showing
-// green while the bot silently never answered -- the same shape as the env
-// var bug in docs/env-propagation.md. This asks the agent what actually
-// happened rather than assuming.
+// That makes two things Claworc has to handle rather than assume:
+//
+//   - Installation. ensureChannelPluginInstalled puts the plugin on the agent
+//     when a channel is enabled. Auto-enable cannot help here: OpenClaw's
+//     applyPluginAutoEnable only flips plugins.entries.<id>.enabled for
+//     plugins it *discovered*, and an uninstalled plugin is not discovered.
+//   - Confirmation. Enabling a channel used to be a write we never checked,
+//     so a plugin that never loaded left the settings card showing green
+//     while the bot silently never answered -- the same shape as the env var
+//     bug in docs/env-propagation.md. channelPluginStatusFor asks the agent
+//     what actually happened.
+//
+// See docs/channel-plugins.md.
 
 // channelPluginState is the coarse outcome shown on a channel settings card.
 type channelPluginState string
@@ -85,29 +94,10 @@ func channelPluginStatusFor(instanceID uint, channelID string) channelPluginStat
 		return channelPluginStatus{State: pluginUnknown, Detail: "Agent is not reachable over SSH"}
 	}
 
-	type execResult struct {
-		stdout string
-		code   int
-		err    error
-	}
-	// ExecOpenclaw takes a context but the RunCommand beneath it does not
-	// honor one, so the deadline has to be enforced here. A session on a dead
-	// client errors out on its own eventually, so the goroutine we stop
-	// waiting for is bounded even though we abandon it.
-	done := make(chan execResult, 1)
-	go func() {
-		stdout, _, code, err := sshproxy.NewSSHInstance(client).
-			ExecOpenclaw(context.Background(), "plugins", "list", "--json")
-		done <- execResult{stdout: stdout, code: code, err: err}
-	}()
-
-	var res execResult
-	select {
-	case res = <-done:
-	case <-time.After(pluginStatusTimeout):
+	res, timedOut := execOpenclawBounded(client, pluginStatusTimeout, "plugins", "list", "--json")
+	if timedOut {
 		return channelPluginStatus{State: pluginUnknown, Detail: "Timed out asking the agent"}
 	}
-
 	if res.err != nil {
 		log.Printf("plugin-status: instance %d: %v", instanceID, res.err)
 		return channelPluginStatus{State: pluginUnknown, Detail: "Could not query the agent"}
@@ -183,4 +173,34 @@ func containsString(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// openclawExecResult is the outcome of one bounded openclaw invocation.
+type openclawExecResult struct {
+	stdout string
+	stderr string
+	code   int
+	err    error
+}
+
+// execOpenclawBounded runs an openclaw command with a wall-clock bound.
+//
+// ExecOpenclaw accepts a context but the RunCommand beneath it does not honor
+// one, so the deadline has to be enforced out here. The abandoned goroutine is
+// still bounded in practice: a session on a dead client errors out on its own
+// once TCP gives up. Returns timedOut=true when the bound was hit, which
+// callers must treat as "no answer", never as a negative answer.
+func execOpenclawBounded(client *gossh.Client, timeout time.Duration, args ...string) (res openclawExecResult, timedOut bool) {
+	done := make(chan openclawExecResult, 1)
+	go func() {
+		stdout, stderr, code, err := sshproxy.NewSSHInstance(client).
+			ExecOpenclaw(context.Background(), args...)
+		done <- openclawExecResult{stdout: stdout, stderr: stderr, code: code, err: err}
+	}()
+	select {
+	case res = <-done:
+		return res, false
+	case <-time.After(timeout):
+		return openclawExecResult{}, true
+	}
 }

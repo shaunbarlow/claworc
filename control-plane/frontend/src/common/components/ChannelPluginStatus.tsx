@@ -56,11 +56,13 @@ export default function ChannelPluginStatusLine({
       );
     case "missing":
       return (
-        <p className="flex items-start gap-1.5 text-xs text-red-600">
-          <XCircle size={14} className="mt-px shrink-0" />
+        <p className="flex items-start gap-1.5 text-xs text-amber-700">
+          <AlertTriangle size={14} className="mt-px shrink-0" />
           <span>
-            The agent has no {channelLabel} plugin. It normally ships inside OpenClaw itself, so
-            this points at the agent image rather than at these settings.
+            The agent doesn't have the {channelLabel} plugin yet — it ships as a separate package
+            from OpenClaw. Saving with {channelLabel} enabled installs it in the background, which
+            can take a few minutes; reload to check. If it stays missing, the agent probably can't
+            reach the npm registry.
           </span>
         </p>
       );
