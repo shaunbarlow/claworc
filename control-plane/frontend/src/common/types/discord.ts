@@ -1,3 +1,5 @@
+import type { ChannelPluginStatus } from "@common/types/channelPlugin";
+
 export interface DiscordChannelRule {
   /** Raw numeric Discord server (guild) ID — not the server name. */
   guild_id: string;
@@ -20,6 +22,8 @@ export interface InstanceDiscord {
   bot_token_masked?: string;
   /** Set by PUT when a token change triggered a container restart. */
   restarting?: boolean;
+  /** Set by GET only, and only while the channel is enabled. */
+  plugin_status?: ChannelPluginStatus;
 }
 
 /** PUT /instances/{id}/discord payload. Omitted fields keep their current value. */

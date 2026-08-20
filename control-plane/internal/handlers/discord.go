@@ -277,6 +277,8 @@ type instanceDiscordResponse struct {
 	HasBotToken    bool                 `json:"has_bot_token"`
 	BotTokenMasked string               `json:"bot_token_masked,omitempty"`
 	Restarting     bool                 `json:"restarting,omitempty"`
+	// PluginStatus is filled in by GET only -- see GetInstanceDiscord.
+	PluginStatus *channelPluginStatus `json:"plugin_status,omitempty"`
 }
 
 func discordResponseFor(inst database.Instance) instanceDiscordResponse {
@@ -306,12 +308,24 @@ func discordResponseFor(inst database.Instance) instanceDiscordResponse {
 }
 
 // GET /api/v1/instances/{id}/discord
+//
+// Reads the plugin status back off the agent, but only when Discord is
+// actually meant to be running: an agent with Discord off has nothing to
+// report, and the readback costs an SSH round-trip. It is attached here
+// rather than in discordResponseFor so the PUT path stays fast -- a token
+// change restarts the container, and asking a restarting agent about its
+// plugins would just burn the timeout.
 func GetInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 	inst, ok := resolveInstanceForChannelSettings(w, r)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, discordResponseFor(*inst))
+	resp := discordResponseFor(*inst)
+	if resp.Configured && resp.Enabled {
+		status := channelPluginStatusFor(inst.ID, "discord")
+		resp.PluginStatus = &status
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type instanceDiscordUpdateRequest struct {

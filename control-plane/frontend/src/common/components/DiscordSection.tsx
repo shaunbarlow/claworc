@@ -3,6 +3,7 @@ import { useInstanceDiscord, useUpdateInstanceDiscord } from "@common/hooks/useD
 import type { DiscordChannelRule, InstanceDiscordUpdatePayload } from "@common/types/discord";
 import { successToast, errorToast, infoToast } from "@common/utils/toast";
 import DiscordChannelsEditor, { DiscordDMPolicySelect } from "@common/components/DiscordChannelsEditor";
+import ChannelPluginStatusLine from "@common/components/ChannelPluginStatus";
 
 interface Props {
   instanceId: number;
@@ -132,6 +133,8 @@ export default function DiscordSection({ instanceId }: Props) {
             (here or as a DISCORD_BOT_TOKEN env var).
           </p>
         )}
+
+        <ChannelPluginStatusLine status={data?.plugin_status} channelLabel="Discord" />
 
         <DiscordChannelsEditor
           channels={channels}

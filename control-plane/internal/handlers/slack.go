@@ -251,7 +251,9 @@ type instanceSlackResponse struct {
 	HasAppToken    bool                `json:"has_app_token"`
 	BotTokenMasked string              `json:"bot_token_masked,omitempty"`
 	AppTokenMasked string              `json:"app_token_masked,omitempty"`
-	Restarting     bool                `json:"restarting,omitempty"`
+	// PluginStatus is filled in by GET only -- see GetInstanceSlack.
+	PluginStatus *channelPluginStatus `json:"plugin_status,omitempty"`
+	Restarting   bool                 `json:"restarting,omitempty"`
 }
 
 func slackResponseFor(inst database.Instance) instanceSlackResponse {
@@ -306,12 +308,21 @@ func resolveInstanceForChannelSettings(w http.ResponseWriter, r *http.Request) (
 }
 
 // GET /api/v1/instances/{id}/slack
+//
+// Attaches the plugin readback on the same terms as GetInstanceDiscord: only
+// when Slack is meant to be running, and only on GET so the token-change PUT
+// (which restarts the container) never waits on an agent that is going away.
 func GetInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	inst, ok := resolveInstanceForChannelSettings(w, r)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, slackResponseFor(*inst))
+	resp := slackResponseFor(*inst)
+	if resp.Configured && resp.Enabled {
+		status := channelPluginStatusFor(inst.ID, "slack")
+		resp.PluginStatus = &status
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type instanceSlackUpdateRequest struct {

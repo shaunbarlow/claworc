@@ -3,6 +3,7 @@ import { useInstanceSlack, useUpdateInstanceSlack } from "@common/hooks/useSlack
 import type { InstanceSlackUpdatePayload, SlackChannel } from "@common/types/slack";
 import { successToast, errorToast, infoToast } from "@common/utils/toast";
 import SlackChannelsEditor, { SlackDMPolicySelect } from "@common/components/SlackChannelsEditor";
+import ChannelPluginStatusLine from "@common/components/ChannelPluginStatus";
 
 interface Props {
   instanceId: number;
@@ -138,6 +139,8 @@ export default function SlackSection({ instanceId }: Props) {
             SLACK_BOT_TOKEN / SLACK_APP_TOKEN env vars).
           </p>
         )}
+
+        <ChannelPluginStatusLine status={data?.plugin_status} channelLabel="Slack" />
 
         <SlackChannelsEditor
           channels={channels}

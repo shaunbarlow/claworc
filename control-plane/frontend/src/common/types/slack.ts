@@ -1,3 +1,5 @@
+import type { ChannelPluginStatus } from "@common/types/channelPlugin";
+
 export interface SlackChannel {
   /** Raw Slack channel ID (e.g. C0123456789) — not the channel name. */
   id: string;
@@ -20,6 +22,8 @@ export interface InstanceSlack {
   app_token_masked?: string;
   /** Set by PUT when a token change triggered a container restart. */
   restarting?: boolean;
+  /** Set by GET only, and only while the channel is enabled. */
+  plugin_status?: ChannelPluginStatus;
 }
 
 /** PUT /instances/{id}/slack payload. Omitted fields keep their current value. */
