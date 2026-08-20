@@ -140,6 +140,7 @@ export default function AgentForm({
   const [slackAppToken, setSlackAppToken] = useState("");
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
   const [slackDmPolicy, setSlackDmPolicy] = useState("");
+  const [slackDmAllowFrom, setSlackDmAllowFrom] = useState<string[]>([]);
 
   // Discord connection (optional): same contract as Slack, single bot token
   // riding the encrypted env-var path server-side (DISCORD_BOT_TOKEN).
@@ -204,6 +205,7 @@ export default function AgentForm({
         enabled: true,
         channels: slackChannels.filter((c) => c.id.trim() !== ""),
         dm_policy: slackDmPolicy || undefined,
+        dm_allow_from: slackDmAllowFrom.filter((u) => u.trim() !== ""),
         bot_token: slackBotToken.trim() || undefined,
         app_token: slackAppToken.trim() || undefined,
       };
@@ -475,7 +477,12 @@ export default function AgentForm({
                 </p>
               )}
               <SlackChannelsEditor channels={slackChannels} onChange={setSlackChannels} />
-              <SlackDMPolicySelect value={slackDmPolicy} onChange={setSlackDmPolicy} />
+              <SlackDMPolicySelect
+                value={slackDmPolicy}
+                onChange={setSlackDmPolicy}
+                allowFrom={slackDmAllowFrom}
+                onAllowFromChange={setSlackDmAllowFrom}
+              />
             </>
           )}
         </div>

@@ -61,6 +61,9 @@ and delivered two ways:
    (`applySlackConfig` in `internal/handlers/slack.go`), so channel/DM changes
    apply without a container restart. A *token* change instead triggers the
    standard env-vars container restart, which re-applies everything via (1).
+   That restart is not decided by "did the row change" — it is decided by
+   `EnsureEnvPropagated`, which compares the live container's environment
+   against what the database says it should be. See `docs/env-propagation.md`.
 
 The unset-before-set is required because `openclaw config set` deep-merges map
 values — without it, channels removed in Claworc would linger. Consequence:
@@ -88,8 +91,40 @@ Channel entries must be raw Slack channel IDs (`C…`/`G…`, uppercase
 alphanumeric with at least one digit — `#name` prefixes are stripped, input is
 uppercased, duplicates dropped). Names are rejected up front because OpenClaw
 routes by ID under `groupPolicy: "allowlist"` and name keys silently fail to
-match. `dm_policy` is one of `pairing` (default), `open` (rendered with
-`allowFrom: ["*"]`, which OpenClaw requires for open DMs), or `disabled`.
+match.
+
+## DM policy
+
+`dm_policy` maps onto OpenClaw's `channels.slack.dmPolicy`:
+
+| `dm_policy` | Behavior |
+|---|---|
+| `""` / `"pairing"` | Default. An unknown user must complete a one-time pairing approval before the agent answers. |
+| `"allowlist"` | Only the users in `dm_allow_from` are answered, **with no pairing handshake**. Everyone else is ignored. |
+| `"open"` | Anyone in the workspace can DM the agent. Rendered with `allowFrom: ["*"]`, which OpenClaw requires for open DMs. |
+| `"disabled"` | DMs are ignored entirely. |
+
+`allowlist` is the option for "these specific people, no ceremony". The member
+IDs are rendered into `allowFrom`, the same field `open` fills with `"*"`:
+
+```json
+{ "dmPolicy": "allowlist", "allowFrom": ["U0123456789"] }
+```
+
+IDs are raw Slack member IDs — `U…`, or `W…` on Enterprise Grid (click a user
+→ View full profile → ⋮ → Copy member ID). A pasted mention (`<@U…>`) is
+normalized down to the bare ID and input is uppercased.
+
+Display names are rejected even though OpenClaw's DM allowlist *does* also
+match on name: names are mutable and ambiguous while the member ID is stable,
+so Claworc takes the same line here that it takes for channel names. The
+at-least-one-digit rule in the ID regex is what stops a display name beginning
+with U or W from slipping through after uppercasing.
+
+An empty `dm_allow_from` under `allowlist` is rejected — it blocks every DM
+while reading as "some users are allowed", which is `disabled` under the wrong
+name. The list is preserved when you switch to another policy, so toggling in
+the UI does not discard it.
 
 ## UI
 

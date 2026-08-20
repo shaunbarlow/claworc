@@ -11,6 +11,8 @@ export interface InstanceSlack {
   enabled: boolean;
   channels: SlackChannel[];
   dm_policy: string;
+  /** Slack member IDs allowed to DM the agent under the "allowlist" policy. */
+  dm_allow_from: string[];
   has_bot_token: boolean;
   has_app_token: boolean;
   /** Masked token for display (e.g. "****abcd"), only when a token is set. */
@@ -25,6 +27,7 @@ export interface InstanceSlackUpdatePayload {
   enabled?: boolean;
   channels?: SlackChannel[];
   dm_policy?: string;
+  dm_allow_from?: string[];
   /** Tokens: omit = keep, "" = remove, non-empty = set. */
   bot_token?: string;
   app_token?: string;
@@ -35,6 +38,7 @@ export interface SlackCreateConfig {
   enabled: boolean;
   channels?: SlackChannel[];
   dm_policy?: string;
+  dm_allow_from?: string[];
   bot_token?: string;
   app_token?: string;
 }

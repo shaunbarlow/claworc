@@ -35,6 +35,15 @@ const (
 // anything that doesn't look like an ID up front.
 var slackChannelIDRegex = regexp.MustCompile(`^[CG][A-Z0-9]*[0-9][A-Z0-9]*$`)
 
+// slackUserIDRegex matches raw Slack member IDs (U…, or W… on Enterprise
+// Grid), using the same at-least-one-digit trick as the channel regex so a
+// display name like "ursula" cannot slip through after uppercasing.
+//
+// OpenClaw's DM allowlist does also match on display name, but names are
+// mutable and ambiguous while the member ID is stable, so Claworc takes the
+// same line it takes for channels and insists on the ID.
+var slackUserIDRegex = regexp.MustCompile(`^[UW][A-Z0-9]*[0-9][A-Z0-9]*$`)
+
 // slackChannelEntry is one allowlisted channel in the per-instance config.
 type slackChannelEntry struct {
 	ID string `json:"id"`
@@ -47,8 +56,14 @@ type slackChannelEntry struct {
 type instanceSlackConfig struct {
 	Enabled  bool                `json:"enabled"`
 	Channels []slackChannelEntry `json:"channels"`
-	// DMPolicy: "" (OpenClaw default, pairing), "pairing", "open", "disabled".
+	// DMPolicy: "" (OpenClaw default, pairing), "pairing", "allowlist",
+	// "open", "disabled".
 	DMPolicy string `json:"dm_policy,omitempty"`
+	// DMAllowFrom is the set of Slack member IDs allowed to DM the agent
+	// under the "allowlist" policy: those users are let straight through with
+	// no pairing handshake, and everyone else is blocked. Ignored for every
+	// other policy.
+	DMAllowFrom []string `json:"dm_allow_from,omitempty"`
 }
 
 func parseSlackConfig(raw string) (instanceSlackConfig, bool) {
@@ -83,10 +98,41 @@ func validateSlackConfig(cfg *instanceSlackConfig) error {
 		normalized = append(normalized, ch)
 	}
 	cfg.Channels = normalized
+
+	// Normalize the DM allowlist regardless of policy so switching to
+	// "allowlist" and back does not silently discard a saved list. Users are
+	// commonly pasted as a mention (<@U024BE7LH>) rather than a bare ID.
+	allowFrom := make([]string, 0, len(cfg.DMAllowFrom))
+	seenUser := make(map[string]bool, len(cfg.DMAllowFrom))
+	for _, raw := range cfg.DMAllowFrom {
+		uid := strings.TrimSpace(raw)
+		uid = strings.TrimSuffix(strings.TrimPrefix(uid, "<@"), ">")
+		uid = strings.ToUpper(uid)
+		if uid == "" {
+			continue
+		}
+		if !slackUserIDRegex.MatchString(uid) {
+			return fmt.Errorf("invalid Slack user ID %q: use the member ID (e.g. U0123456789), not the display name", raw)
+		}
+		if seenUser[uid] {
+			continue
+		}
+		seenUser[uid] = true
+		allowFrom = append(allowFrom, uid)
+	}
+	cfg.DMAllowFrom = allowFrom
+
 	switch cfg.DMPolicy {
 	case "", "pairing", "open", "disabled":
+	case "allowlist":
+		// An empty allowlist would block every DM while reading in the UI as
+		// "specific users are allowed" -- that is "disabled" wearing the wrong
+		// label, so make the user say which one they meant.
+		if len(cfg.DMAllowFrom) == 0 {
+			return fmt.Errorf("dm_policy \"allowlist\" needs at least one Slack member ID (use \"disabled\" to block all DMs)")
+		}
 	default:
-		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, open, disabled", cfg.DMPolicy)
+		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, allowlist, open, disabled", cfg.DMPolicy)
 	}
 	return nil
 }
@@ -114,6 +160,12 @@ func renderSlackChannelsJSON(cfg instanceSlackConfig) (string, error) {
 			// OpenClaw requires an explicit wildcard sender allowlist for open DMs.
 			block["dmPolicy"] = "open"
 			block["allowFrom"] = []string{"*"}
+		case "allowlist":
+			// Named users are let through with no pairing handshake; everyone
+			// else is blocked. allowFrom carries the senders for this policy
+			// exactly as the "*" wildcard does for "open".
+			block["dmPolicy"] = "allowlist"
+			block["allowFrom"] = cfg.DMAllowFrom
 		case "pairing", "disabled":
 			block["dmPolicy"] = cfg.DMPolicy
 		}
@@ -194,6 +246,7 @@ type instanceSlackResponse struct {
 	Enabled        bool                `json:"enabled"`
 	Channels       []slackChannelEntry `json:"channels"`
 	DMPolicy       string              `json:"dm_policy"`
+	DMAllowFrom    []string            `json:"dm_allow_from"`
 	HasBotToken    bool                `json:"has_bot_token"`
 	HasAppToken    bool                `json:"has_app_token"`
 	BotTokenMasked string              `json:"bot_token_masked,omitempty"`
@@ -204,13 +257,17 @@ type instanceSlackResponse struct {
 func slackResponseFor(inst database.Instance) instanceSlackResponse {
 	cfg, configured := parseSlackConfig(inst.SlackConfig)
 	resp := instanceSlackResponse{
-		Configured: configured,
-		Enabled:    cfg.Enabled,
-		Channels:   cfg.Channels,
-		DMPolicy:   cfg.DMPolicy,
+		Configured:  configured,
+		Enabled:     cfg.Enabled,
+		Channels:    cfg.Channels,
+		DMPolicy:    cfg.DMPolicy,
+		DMAllowFrom: cfg.DMAllowFrom,
 	}
 	if resp.Channels == nil {
 		resp.Channels = []slackChannelEntry{}
+	}
+	if resp.DMAllowFrom == nil {
+		resp.DMAllowFrom = []string{}
 	}
 	// Token presence reflects what the container actually receives: global
 	// defaults merged with per-instance overrides.
@@ -258,9 +315,10 @@ func GetInstanceSlack(w http.ResponseWriter, r *http.Request) {
 }
 
 type instanceSlackUpdateRequest struct {
-	Enabled  *bool                `json:"enabled"`
-	Channels *[]slackChannelEntry `json:"channels"`
-	DMPolicy *string              `json:"dm_policy"`
+	Enabled     *bool                `json:"enabled"`
+	Channels    *[]slackChannelEntry `json:"channels"`
+	DMPolicy    *string              `json:"dm_policy"`
+	DMAllowFrom *[]string            `json:"dm_allow_from"`
 	// Tokens: nil = keep current value, "" = remove, non-empty = set.
 	BotToken *string `json:"bot_token"`
 	AppToken *string `json:"app_token"`
@@ -294,6 +352,9 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DMPolicy != nil {
 		cfg.DMPolicy = *body.DMPolicy
+	}
+	if body.DMAllowFrom != nil {
+		cfg.DMAllowFrom = *body.DMAllowFrom
 	}
 	if cfg.Channels == nil {
 		cfg.Channels = []slackChannelEntry{}

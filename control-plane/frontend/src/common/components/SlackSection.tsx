@@ -20,6 +20,7 @@ export default function SlackSection({ instanceId }: Props) {
   const [enabled, setEnabled] = useState(false);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [dmPolicy, setDmPolicy] = useState("");
+  const [dmAllowFrom, setDmAllowFrom] = useState<string[]>([]);
   const [botToken, setBotToken] = useState("");
   const [appToken, setAppToken] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -29,6 +30,7 @@ export default function SlackSection({ instanceId }: Props) {
     setEnabled(data.enabled);
     setChannels(data.channels);
     setDmPolicy(data.dm_policy ?? "");
+    setDmAllowFrom(data.dm_allow_from ?? []);
   }, [data, dirty]);
 
   const markDirty = () => setDirty(true);
@@ -38,6 +40,7 @@ export default function SlackSection({ instanceId }: Props) {
       enabled,
       channels: channels.filter((c) => c.id.trim() !== ""),
       dm_policy: dmPolicy,
+      dm_allow_from: dmAllowFrom.filter((u) => u.trim() !== ""),
     };
     // Tokens are only sent when the user typed one — an empty field means
     // "keep the current token" (remove via the Environment Variables card).
@@ -150,6 +153,11 @@ export default function SlackSection({ instanceId }: Props) {
           disabled={!enabled}
           onChange={(v) => {
             setDmPolicy(v);
+            markDirty();
+          }}
+          allowFrom={dmAllowFrom}
+          onAllowFromChange={(users) => {
+            setDmAllowFrom(users);
             markDirty();
           }}
         />

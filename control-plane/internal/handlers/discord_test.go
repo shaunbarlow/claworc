@@ -36,7 +36,11 @@ func TestValidateDiscordConfigRejectsBadInput(t *testing.T) {
 			{GuildID: "123456789012345678"},
 			{GuildID: "123456789012345678", ChannelID: "234567890123456789"},
 		}},
-		{Enabled: true, DMPolicy: "allowlist"},
+		// "allowlist" used to be the example of an unsupported policy here. It
+		// is supported now, so this needs a value that is genuinely not a
+		// policy -- an allowlist with no users is still rejected, but by a
+		// different rule (see TestValidateDiscordConfigDMAllowlist).
+		{Enabled: true, DMPolicy: "everyone"},
 	}
 	for i, cfg := range cases {
 		if err := validateDiscordConfig(&cfg); err == nil {
