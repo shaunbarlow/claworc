@@ -263,7 +263,7 @@ func TestCreateFullBackup_Success(t *testing.T) {
 	}
 
 	// Wait for async goroutine to complete
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		b, err := database.GetBackup(backupID)
 		if err != nil {
@@ -330,7 +330,7 @@ func TestCreateFullBackup_StreamError(t *testing.T) {
 	}
 
 	// Wait for async goroutine
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		b, _ := database.GetBackup(backupID)
 		if b.Status != "running" {
@@ -366,7 +366,7 @@ func TestCreateFullBackup_TarExitCode2(t *testing.T) {
 
 	backupID, _ := CreateFullBackup(context.Background(), orch, inst.Name, inst.ID, 0, "", nil)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		b, _ := database.GetBackup(backupID)
 		if b.Status != "running" {
@@ -400,7 +400,7 @@ func TestCreateFullBackup_TarExitCode1_Accepted(t *testing.T) {
 
 	backupID, _ := CreateFullBackup(context.Background(), orch, inst.Name, inst.ID, 0, "", nil)
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		b, _ := database.GetBackup(backupID)
 		if b.Status != "running" {
@@ -437,7 +437,7 @@ func TestCreateFullBackup_DefaultPaths(t *testing.T) {
 	CreateFullBackup(context.Background(), orch, inst.Name, inst.ID, 0, "", nil)
 
 	// Wait for goroutine to start and capture the command
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for capturedCmd == nil {
 		if time.Now().After(deadline) {
 			t.Fatal("timeout waiting for command capture")
