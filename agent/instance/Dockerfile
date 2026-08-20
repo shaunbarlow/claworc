@@ -72,6 +72,19 @@ RUN mkdir -p /opt/homebrew-skeleton && \
     mkdir -p /home/linuxbrew/.linuxbrew && \
     chown -R claworc:claworc /opt/homebrew-skeleton /home/linuxbrew
 
+# QMD (github.com/tobi/qmd): local-first hybrid search CLI that OpenClaw
+# shells out to when memory.backend=qmd (pushed by the control plane; the
+# baked config keeps the builtin backend). Bun runs it; both live under
+# /opt/bun, with launchers symlinked into /usr/local/bin so qmd is on PATH
+# for the openclaw-gateway process (which resolves the `qmd` command from
+# its own PATH, not an interactive shell's). Model downloads and the index
+# happen at runtime under ~/.cache and ~/.openclaw on the home PVC.
+RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
+    BUN_INSTALL=/opt/bun /opt/bun/bin/bun add -g --trust github:tobi/qmd && \
+    ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
+    ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
+    /usr/local/bin/qmd --version
+
 COPY browser.json /defaults/browser.json
 # TOOLS.md is staged here only so the bake step below can drop it into the
 # baked workspace. The runtime contract is that the canonical TOOLS.md lives

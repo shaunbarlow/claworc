@@ -16,6 +16,7 @@ import SimpleKVEditor from "@common/components/SimpleKVEditor";
 import TolerationsEditor from "@common/components/TolerationsEditor";
 import AffinityEditor from "@common/components/AffinityEditor";
 import PortsEditor from "@common/components/PortsEditor";
+import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
 import { useHealth } from "@common/hooks/useHealth";
 import StickyActionBar from "@common/components/StickyActionBar";
 import Page from "@common/components/Page";
@@ -509,6 +510,15 @@ function EnvironmentTab({
   const handleSaveGlobalPorts = async (next: import("@common/types/instance").PortSpec[]) => {
     await placementMutation.mutateAsync({ default_ports: next });
   };
+  const handleSaveMemoryDefaults = async (
+    backend: "" | "builtin" | "qmd",
+    qmd: import("@common/types/instance").MemoryQmdSettings,
+  ) => {
+    await placementMutation.mutateAsync({
+      default_memory_backend: backend === "" ? "builtin" : backend,
+      default_memory_qmd: qmd,
+    });
+  };
 
   const resourceFields: {
     key: string;
@@ -637,6 +647,21 @@ function EnvironmentTab({
           </div>
         </div>
       </div>
+
+      <MemorySettingsEditor
+        key={`mem-${JSON.stringify(settings.default_memory_backend)}-${JSON.stringify(settings.default_memory_qmd)}`}
+        title="Memory Defaults"
+        description="OpenClaw memory backend for agents without a per-agent override. QMD is a local-first hybrid search sidecar; the builtin backend is OpenClaw's stock SQLite index."
+        backend={settings.default_memory_backend === "qmd" ? "qmd" : "builtin"}
+        backendOptions={[
+          { value: "builtin", label: "Builtin (OpenClaw default)" },
+          { value: "qmd", label: "QMD (local hybrid search)" },
+        ]}
+        qmd={settings.default_memory_qmd ?? {}}
+        footnote="Saving restarts the openclaw-gateway service on every running agent."
+        onSave={handleSaveMemoryDefaults}
+        isSaving={placementMutation.isPending}
+      />
 
       <EnvVarsEditor
         values={settings.default_env_vars ?? {}}

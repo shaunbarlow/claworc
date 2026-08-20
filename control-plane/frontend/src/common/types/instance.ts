@@ -192,3 +192,43 @@ export interface InstanceConfigUpdate {
   config: string;
   restarted: boolean;
 }
+
+/** Curated QMD memory settings managed by Claworc (see docs/qmd-memory.md).
+ * Unset fields inherit: instance override → global default → OpenClaw default. */
+export interface MemoryQmdSettings {
+  search_mode?: "search" | "vsearch" | "query";
+  /** Reindex cadence, e.g. "5m", "1h". */
+  update_interval?: string;
+  max_results?: number;
+  /** Index session transcripts. */
+  sessions_enabled?: boolean;
+  /** Index MEMORY.md and memory/ markdown in the workspace. */
+  include_default_memory?: boolean;
+  /** Raw JSON object deep-merged into memory.qmd for anything not modeled above. */
+  advanced?: Record<string, unknown>;
+}
+
+export interface IndexedFolder {
+  id: number;
+  name: string;
+  mount_path: string;
+  pattern: string;
+}
+
+/** GET/PATCH /instances/{id}/memory payload. */
+export interface InstanceMemory {
+  /** Per-instance override; "" = inherit the global default. */
+  memory_backend: "" | "builtin" | "qmd";
+  effective_backend: "builtin" | "qmd";
+  default_backend: "builtin" | "qmd";
+  qmd: MemoryQmdSettings;
+  effective_qmd: MemoryQmdSettings;
+  indexed_folders: IndexedFolder[];
+  restarts_gateway_on_apply: boolean;
+}
+
+export interface InstanceMemoryUpdatePayload {
+  memory_backend?: "" | "builtin" | "qmd";
+  /** Full replacement of the per-instance override object. */
+  qmd?: MemoryQmdSettings;
+}

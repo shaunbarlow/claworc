@@ -29,6 +29,10 @@ export interface Settings {
   /** Global ServiceAccount annotations + exposed ports defaults (Kubernetes only). */
   default_service_account_annotations: Record<string, string>;
   default_ports: import("./instance").PortSpec[];
+  /** Default OpenClaw memory backend for agents without an override. */
+  default_memory_backend: "builtin" | "qmd";
+  /** Global QMD memory defaults, merged under per-agent overrides. */
+  default_memory_qmd: import("./instance").MemoryQmdSettings;
   /** "unset" until the user has answered the consent prompt; then "opt_in" or "opt_out". */
   analytics_consent: "unset" | "opt_in" | "opt_out";
   /** Random 32-char hex ID reported alongside anonymous events. Read-only. */
@@ -64,6 +68,8 @@ export interface SettingsUpdatePayload {
   default_affinity?: string;
   default_service_account_annotations?: Record<string, string>;
   default_ports?: import("./instance").PortSpec[];
+  default_memory_backend?: "builtin" | "qmd";
+  default_memory_qmd?: import("./instance").MemoryQmdSettings;
 }
 
 // Keep backward compat alias
