@@ -319,7 +319,7 @@ func GetInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := slackResponseFor(*inst)
 	if resp.Configured && resp.Enabled {
-		status := channelPluginStatusFor(inst.ID, "slack")
+		status := channelPluginStatusCached(inst.ID, "slack")
 		resp.PluginStatus = &status
 	}
 	writeJSON(w, http.StatusOK, resp)

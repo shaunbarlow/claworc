@@ -54,6 +54,10 @@ const (
 	// pluginUnknown: the agent could not be asked. Not a problem report --
 	// the plugin may well be fine.
 	pluginUnknown channelPluginState = "unknown"
+	// pluginChecking: a probe is running and there is no cached answer yet.
+	// Distinct from pluginUnknown so the UI can say "ask again shortly"
+	// instead of "could not reach the agent", and poll rather than give up.
+	pluginChecking channelPluginState = "checking"
 )
 
 type channelPluginStatus struct {
@@ -61,10 +65,21 @@ type channelPluginStatus struct {
 	Detail string             `json:"detail,omitempty"`
 }
 
-// pluginStatusTimeout bounds the readback. `plugins list` loads every plugin
-// in a fresh CLI process, so it is not instant, but it runs inline in a GET
-// and must not hold the request open indefinitely.
-const pluginStatusTimeout = 8 * time.Second
+// pluginStatusProbeTimeout bounds one probe.
+//
+// This was 8s, chosen without measuring, and it timed out every time. The work
+// behind `plugins list --json` is not small: ExecOpenclaw runs it through
+// `su - claworc`, a *login* shell that sources a profile reaching into the
+// Homebrew PVC, and the command then boots Node and has OpenClaw discover and
+// load every plugin it can find. Tens of seconds on a busy agent is ordinary
+// rather than pathological, so the budget is now generous -- and, crucially,
+// no longer sits on a request (see channelPluginStatusCached).
+const pluginStatusProbeTimeout = 90 * time.Second
+
+// pluginStatusCacheTTL is how long a probe result is served before another
+// probe is run. Plugin state only changes when something installs, enables or
+// breaks a plugin, so it does not need to be fresh to the second.
+const pluginStatusCacheTTL = 2 * time.Minute
 
 // openclawPluginsList is the subset of `openclaw plugins list --json` we read.
 type openclawPluginsList struct {
@@ -76,13 +91,14 @@ type openclawPluginsList struct {
 	} `json:"plugins"`
 }
 
-// channelPluginStatusFor asks the agent whether the plugin backing channelID
-// ("slack" / "discord") actually loaded.
+// probeChannelPluginStatus asks the agent whether the plugin backing channelID
+// ("slack" / "discord") actually loaded. Synchronous and slow -- callers on a
+// request path want channelPluginStatusCached instead.
 //
 // Best-effort by construction: every failure to ask returns pluginUnknown
 // rather than a scary state, because "we could not check" and "it is broken"
 // are different claims and the card must not conflate them.
-func channelPluginStatusFor(instanceID uint, channelID string) channelPluginStatus {
+func probeChannelPluginStatus(instanceID uint, channelID string) channelPluginStatus {
 	if SSHMgr == nil {
 		return channelPluginStatus{State: pluginUnknown, Detail: "SSH is not configured on the control plane"}
 	}
@@ -94,7 +110,7 @@ func channelPluginStatusFor(instanceID uint, channelID string) channelPluginStat
 		return channelPluginStatus{State: pluginUnknown, Detail: "Agent is not reachable over SSH"}
 	}
 
-	res, timedOut := execOpenclawBounded(client, pluginStatusTimeout, "plugins", "list", "--json")
+	res, timedOut := execOpenclawBounded(client, pluginStatusProbeTimeout, "plugins", "list", "--json")
 	if timedOut {
 		return channelPluginStatus{State: pluginUnknown, Detail: "Timed out asking the agent"}
 	}

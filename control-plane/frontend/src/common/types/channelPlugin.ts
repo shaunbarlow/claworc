@@ -10,7 +10,8 @@ export interface ChannelPluginStatus {
    * - `error`    — present but failed to load; `detail` carries the reason.
    * - `missing`  — not in the agent at all (an agent-image problem).
    * - `unknown`  — the agent could not be asked; says nothing about health.
+   * - `checking` — a probe is running and no answer has landed yet.
    */
-  state: "loaded" | "disabled" | "error" | "missing" | "unknown";
+  state: "loaded" | "disabled" | "error" | "missing" | "unknown" | "checking";
   detail?: string;
 }

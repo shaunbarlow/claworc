@@ -322,7 +322,7 @@ func GetInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := discordResponseFor(*inst)
 	if resp.Configured && resp.Enabled {
-		status := channelPluginStatusFor(inst.ID, "discord")
+		status := channelPluginStatusCached(inst.ID, "discord")
 		resp.PluginStatus = &status
 	}
 	writeJSON(w, http.StatusOK, resp)

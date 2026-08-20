@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertTriangle, HelpCircle, XCircle } from "lucide-react";
+import { CheckCircle2, AlertTriangle, HelpCircle, Loader2, XCircle } from "lucide-react";
 import type { ChannelPluginStatus as Status } from "@common/types/channelPlugin";
 
 /**
@@ -20,6 +20,15 @@ export default function ChannelPluginStatusLine({
   if (!status) return null;
 
   const detail = status.detail ? ` — ${status.detail}` : "";
+
+  if (status.state === "checking") {
+    return (
+      <p className="flex items-start gap-1.5 text-xs text-gray-500">
+        <Loader2 size={14} className="mt-px shrink-0 animate-spin" />
+        <span>Checking whether the agent loaded the {channelLabel} plugin…</span>
+      </p>
+    );
+  }
 
   switch (status.state) {
     case "loaded":

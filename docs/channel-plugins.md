@@ -147,15 +147,49 @@ object read off the agent via `openclaw plugins list --json`:
 | `missing` | Not installed on the agent. Enabling the channel triggers the background install described above. |
 | `unknown` | The agent could not be asked. Says nothing about health. |
 
+Plus `checking`, returned while the first probe is still running.
+
+### Why it is cached rather than probed inline
+
+The probe is slow, and badly underestimating it broke the whole feature once
+already. `ExecOpenclaw` runs the command through `su - claworc` — a *login*
+shell that sources a profile reaching into the Homebrew PVC — and the command
+then boots Node and has OpenClaw discover and load every plugin it can find.
+The original 8-second inline budget timed out every time, which was worse than
+no feature at all: the card learned nothing, **and** the on-demand installer,
+which asks the same question before acting, read the timeout as "cannot
+confirm" and refused to install.
+
+So the probe runs off the request path, on a 90s budget, and results are cached
+for `pluginStatusCacheTTL`. A GET serves the last known answer and refreshes in
+the background; the card shows `checking` only until the first probe lands, and
+the frontend polls while it does.
+
 Design constraints worth preserving:
 
+- **Never probe inline.** Any budget short enough for a request is too short
+  for the command.
+- **A failed probe must not overwrite a good cached answer.** A brief restart
+  would otherwise erase what we know and blank the card until the agent is
+  back.
+- **The installer probes synchronously on the full budget**, and never reads
+  the cache — it can afford to wait, and acting on a `checking` placeholder is
+  exactly the guess it exists to refuse.
 - **GET only.** A token-change PUT restarts the container; asking a departing
   agent about its plugins would just burn the timeout.
 - **Only when the channel is enabled.** An agent with the channel off has
-  nothing to report, and the readback costs an SSH round-trip.
-- **`GetConnection`, not `WaitForSSH`.** This runs inline in a request and
-  must never block waiting for an agent to come up. No live connection means
-  `unknown`, immediately.
+  nothing to report, and the probe is not free.
 - **`unknown` is neutral, never a warning.** "We could not check" and "it is
   broken" are different claims; conflating them trains people to ignore the
   warning that matters.
+
+### Measuring it on a real agent
+
+If the probe still times out, time the command itself before changing budgets:
+
+```bash
+time su - claworc -c 'openclaw plugins list --json > /dev/null'
+```
+
+Splitting that into the login-shell cost (`time su - claworc -c true`) and the
+command cost tells you which half to attack.

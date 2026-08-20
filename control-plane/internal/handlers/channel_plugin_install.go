@@ -77,10 +77,15 @@ func EnsureChannelPluginInstalled(instanceID uint, instanceName, channelID strin
 		}
 
 		// Re-check against the agent rather than trusting the caller: the
-		// plugin may already be there from an earlier enable, a baked image,
-		// or a manual install, and reinstalling would restart the gateway for
-		// nothing.
-		switch status := channelPluginStatusFor(instanceID, channelID); status.State {
+		// plugin may already be there from an earlier enable or a manual
+		// install, and reinstalling would restart the gateway for nothing.
+		//
+		// Probes synchronously on the full budget rather than reading the
+		// cache. This goroutine can afford to wait, and it needs a real
+		// answer: the cache may still be serving "checking" from a first page
+		// load, and acting on a placeholder is exactly the guess the
+		// pluginUnknown branch below exists to refuse.
+		switch status := probeChannelPluginStatus(instanceID, channelID); status.State {
 		case pluginMissing:
 			// the one case worth acting on
 		case pluginUnknown:
@@ -117,6 +122,8 @@ func EnsureChannelPluginInstalled(instanceID uint, instanceName, channelID strin
 			log.Printf("plugin-install: %s: installed %s but could not restart the gateway: %v", name, spec, err)
 			return
 		}
+		// The cached "missing" is now wrong by construction.
+		invalidateChannelPluginStatus(instanceID, channelID)
 		log.Printf("plugin-install: %s: installed %s and restarted the gateway", name, spec)
 	}()
 }
