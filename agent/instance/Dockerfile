@@ -79,9 +79,13 @@ RUN mkdir -p /opt/homebrew-skeleton && \
 # for the openclaw-gateway process (which resolves the `qmd` command from
 # its own PATH, not an interactive shell's). Model downloads and the index
 # happen at runtime under ~/.cache and ~/.openclaw on the home PVC.
+# The bun symlink must exist BEFORE `bun add`: better-sqlite3 (a qmd
+# dependency) may fall back to node-gyp, which bun shims with a script that
+# invokes `bun` from PATH — without the symlink the install dies with
+# "node-gyp: 3: bun: not found" (exit 127).
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
-    BUN_INSTALL=/opt/bun /opt/bun/bin/bun add -g --trust github:tobi/qmd && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
+    BUN_INSTALL=/opt/bun bun add -g --trust github:tobi/qmd && \
     ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
     /usr/local/bin/qmd --version
 
