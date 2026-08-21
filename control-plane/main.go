@@ -520,10 +520,12 @@ func main() {
 				r.Get("/llm/catalog", handlers.GetCatalogProviders)
 				r.Get("/llm/catalog/{key}", handlers.GetCatalogProviderDetail)
 
-				// Skills: library curation (Upload/Delete/PutSkillFile/Clawhub
-				// search) stays admin-only. Read + Deploy moved out — managers
-				// need to read library skills and deploy them to their teams.
+				// Skills: library curation (Create/Upload/Delete/PutSkillFile/
+				// Clawhub search) stays admin-only. Read + Deploy moved out —
+				// managers need to read library skills and deploy them to their
+				// teams.
 				r.Post("/skills", handlers.UploadSkill)
+				r.Post("/skills/new", handlers.CreateSkill)
 				r.Delete("/skills/{slug}", handlers.DeleteSkill)
 				r.Get("/skills/clawhub/search", handlers.ClawhubSearch)
 				r.Post("/skills/clawhub/import", handlers.ImportClawhubSkill)

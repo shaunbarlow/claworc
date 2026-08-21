@@ -4,6 +4,7 @@ import { useSkills, useDeleteSkill, useClawhubSearch, useImportSkill } from "@co
 import { LibrarySkillCard, DiscoverSkillCard } from "@common/components/skills/SkillCard";
 import DeployModal from "@common/components/skills/DeployModal";
 import UploadSkillModal from "@common/components/skills/UploadSkillModal";
+import CreateSkillModal from "@common/components/skills/CreateSkillModal";
 import SkillEditorModal from "@common/components/skills/SkillEditorModal";
 import SkillExistsModal from "@common/components/skills/SkillExistsModal";
 import { useAuth } from "@common/contexts/AuthContext";
@@ -25,6 +26,7 @@ export default function SkillsPage() {
   const { isAdmin } = useAuth();
   const [tab, setTab] = useState<Tab>("library");
   const [showUpload, setShowUpload] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
   const [deployTarget, setDeployTarget] = useState<DeployTarget | null>(null);
   const [editSlug, setEditSlug] = useState<string | null>(null);
   const [existingChoice, setExistingChoice] = useState<ClawhubResult | null>(null);
@@ -114,12 +116,20 @@ export default function SkillsPage() {
       title="Skills"
       actions={
         isAdmin ? (
-          <button
-            onClick={() => setShowUpload(true)}
-            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 ${tab !== "library" ? "invisible" : ""}`}
-          >
-            Upload Skill
-          </button>
+          <div className={`flex items-center gap-2 ${tab !== "library" ? "invisible" : ""}`}>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Create Skill
+            </button>
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+            >
+              Upload Skill
+            </button>
+          </div>
         ) : undefined
       }
       tabs={
@@ -218,6 +228,12 @@ export default function SkillsPage() {
         <UploadSkillModal
           onClose={() => setShowUpload(false)}
           onUploaded={() => setShowUpload(false)}
+        />
+      )}
+      {showCreate && (
+        <CreateSkillModal
+          onClose={() => setShowCreate(false)}
+          onCreated={(slug) => setEditSlug(slug)}
         />
       )}
       {editSlug && (() => {

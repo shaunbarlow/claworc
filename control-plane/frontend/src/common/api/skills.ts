@@ -23,6 +23,18 @@ export async function deleteSkill(slug: string): Promise<void> {
   await client.delete(`/skills/${slug}`);
 }
 
+export interface CreateSkillPayload {
+  slug: string;
+  description: string;
+  required_env_vars: string[];
+  body: string;
+}
+
+export async function createSkill(payload: CreateSkillPayload): Promise<Skill> {
+  const res = await client.post<Skill>("/skills/new", payload);
+  return res.data;
+}
+
 export async function importClawhubSkill(
   slug: string,
   version?: string,

@@ -149,3 +149,81 @@ func TestEncodeRequiredEnvVars_Empty(t *testing.T) {
 		t.Errorf("encodeRequiredEnvVars([]) = %q, want %q", got, "[]")
 	}
 }
+
+func TestValidateNewSkillSlug(t *testing.T) {
+	t.Parallel()
+
+	good := []string{"skill", "my-skill", "skill2", "a-b-c-123"}
+	for _, slug := range good {
+		if err := validateNewSkillSlug(slug); err != nil {
+			t.Errorf("validateNewSkillSlug(%q): unexpected error: %v", slug, err)
+		}
+	}
+
+	bad := []string{"", "My-Skill", "my_skill", "-my-skill", "my-skill-", "my--skill", "my skill", "../etc", "my/skill"}
+	for _, slug := range bad {
+		if err := validateNewSkillSlug(slug); err == nil {
+			t.Errorf("validateNewSkillSlug(%q): expected error, got none", slug)
+		}
+	}
+}
+
+// TestBuildSkillMDContent_RoundTrips renders a SKILL.md via
+// buildSkillMDContent and asserts parseSkillFrontmatter can read it straight
+// back -- the two functions have to agree on the frontmatter shape since a
+// skill created here is indistinguishable from one uploaded as a zip.
+func TestBuildSkillMDContent_RoundTrips(t *testing.T) {
+	t.Parallel()
+
+	fm := skillFrontmatter{
+		Name:            "my-skill",
+		Description:     "Does a thing when asked.",
+		RequiredEnvVars: []string{"API_KEY", "PROVIDER_NAME"},
+	}
+	body := "# My Skill\n\nInstructions go here.\n"
+
+	content, err := buildSkillMDContent(fm, body)
+	if err != nil {
+		t.Fatalf("buildSkillMDContent: %v", err)
+	}
+
+	parsed, err := parseSkillFrontmatter(content)
+	if err != nil {
+		t.Fatalf("parseSkillFrontmatter on rendered content: %v\ncontent:\n%s", err, content)
+	}
+	if parsed.Name != fm.Name {
+		t.Errorf("Name = %q, want %q", parsed.Name, fm.Name)
+	}
+	if parsed.Description != fm.Description {
+		t.Errorf("Description = %q, want %q", parsed.Description, fm.Description)
+	}
+	if !reflect.DeepEqual(parsed.RequiredEnvVars, fm.RequiredEnvVars) {
+		t.Errorf("RequiredEnvVars = %v, want %v", parsed.RequiredEnvVars, fm.RequiredEnvVars)
+	}
+	if !strings.Contains(string(content), body) {
+		t.Errorf("rendered content does not contain the body:\n%s", content)
+	}
+}
+
+// TestBuildSkillMDContent_NoRequiredEnvVars asserts the frontmatter omits
+// required_env_vars entirely (via its yaml "omitempty" tag) when none are
+// given, rather than rendering an empty list.
+func TestBuildSkillMDContent_NoRequiredEnvVars(t *testing.T) {
+	t.Parallel()
+
+	fm := skillFrontmatter{Name: "my-skill", Description: "Does a thing."}
+	content, err := buildSkillMDContent(fm, "body\n")
+	if err != nil {
+		t.Fatalf("buildSkillMDContent: %v", err)
+	}
+	if strings.Contains(string(content), "required_env_vars") {
+		t.Errorf("expected no required_env_vars key, got:\n%s", content)
+	}
+	parsed, err := parseSkillFrontmatter(content)
+	if err != nil {
+		t.Fatalf("parseSkillFrontmatter: %v", err)
+	}
+	if len(parsed.RequiredEnvVars) != 0 {
+		t.Errorf("RequiredEnvVars = %v, want empty", parsed.RequiredEnvVars)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -426,6 +427,105 @@ func saveSkillToLibrary(slug string, fm *skillFrontmatter, files map[string][]by
 		return database.Skill{}, fmt.Errorf("save skill: %w", err)
 	}
 	return skill, nil
+}
+
+// ---------------------------------------------------------------------------
+// Create a new skill from the admin interface (no zip upload required)
+// ---------------------------------------------------------------------------
+
+// skillSlugRegex mirrors common skill-slug conventions (lowercase letters,
+// digits, hyphens; no leading/trailing/doubled hyphen) rather than the looser
+// isSafeSlug check used for zip-derived slugs -- a slug typed by hand in the
+// UI should look like the other skills already in the library.
+var skillSlugRegex = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+func validateNewSkillSlug(slug string) error {
+	if !skillSlugRegex.MatchString(slug) {
+		return fmt.Errorf("invalid slug %q: use lowercase letters, digits, and hyphens only (e.g. my-skill)", slug)
+	}
+	return nil
+}
+
+// buildSkillMDContent renders a SKILL.md file from admin-supplied fields: YAML
+// frontmatter (via the same struct/tags used to parse it, so round-tripping
+// stays consistent) followed by the body markdown.
+func buildSkillMDContent(fm skillFrontmatter, body string) ([]byte, error) {
+	fmYAML, err := yaml.Marshal(fm)
+	if err != nil {
+		return nil, fmt.Errorf("encode frontmatter: %w", err)
+	}
+	body = strings.TrimLeft(body, "\n")
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.Write(fmYAML)
+	b.WriteString("---\n\n")
+	b.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		b.WriteString("\n")
+	}
+	return []byte(b.String()), nil
+}
+
+type createSkillRequest struct {
+	Slug            string   `json:"slug"`
+	Description     string   `json:"description"`
+	RequiredEnvVars []string `json:"required_env_vars"`
+	Body            string   `json:"body"`
+}
+
+// CreateSkill builds a new skill purely from form fields submitted by an
+// admin -- no zip file needed. It renders a SKILL.md from the given
+// frontmatter fields + body and saves it into the library exactly like a
+// single-file zip upload would, so every other skill feature (deploy, the
+// in-browser file editor, adding more files) works on it unchanged.
+func CreateSkill(w http.ResponseWriter, r *http.Request) {
+	var body createSkillRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	slug := strings.TrimSpace(body.Slug)
+	if err := validateNewSkillSlug(slug); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	description := strings.TrimSpace(body.Description)
+	if description == "" {
+		writeError(w, http.StatusBadRequest, "Description is required")
+		return
+	}
+
+	var existing database.Skill
+	if err := database.DB.Where("slug = ?", slug).First(&existing).Error; err == nil {
+		writeError(w, http.StatusConflict, "Skill '"+slug+"' already exists")
+		return
+	}
+
+	fm := skillFrontmatter{
+		Name:            slug,
+		Description:     description,
+		RequiredEnvVars: body.RequiredEnvVars,
+	}
+	skillMD, err := buildSkillMDContent(fm, body.Body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to render SKILL.md")
+		return
+	}
+
+	skill, err := saveSkillToLibrary(slug, &fm, map[string][]byte{"SKILL.md": skillMD})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save skill")
+		return
+	}
+
+	var totalSkills int64
+	database.DB.Model(&database.Skill{}).Count(&totalSkills)
+	analytics.Track(r.Context(), analytics.EventSkillUploaded, map[string]any{
+		"total_skills": totalSkills,
+	})
+
+	writeJSON(w, http.StatusCreated, skillToResponse(skill))
 }
 
 // ---------------------------------------------------------------------------

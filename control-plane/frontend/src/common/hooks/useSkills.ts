@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createSkill,
   deleteSkill,
   deploySkill,
   getSkillFile,
@@ -10,6 +11,7 @@ import {
   searchClawhub,
   uploadSkill,
 } from "@common/api/skills";
+import type { CreateSkillPayload } from "@common/api/skills";
 import { errorToast, successToast } from "@common/utils/toast";
 
 export function useSkills() {
@@ -33,6 +35,23 @@ export function useUploadSkill() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((error as any)?.response?.status === 409) return;
       errorToast("Failed to upload skill", error);
+    },
+  });
+}
+
+export function useCreateSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateSkillPayload) => createSkill(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      successToast("Skill created");
+    },
+    onError: (error, _vars, _ctx) => {
+      // 409 conflicts are handled inline in the modal -- suppress the toast
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if ((error as any)?.response?.status === 409) return;
+      errorToast("Failed to create skill", error);
     },
   });
 }
