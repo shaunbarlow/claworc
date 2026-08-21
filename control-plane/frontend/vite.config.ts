@@ -65,6 +65,12 @@ export default defineConfig({
         // surface the browser's own connectivity error instead of serving a
         // stale login form that then fails mysteriously on submit.
         globPatterns: ["**/*.{js,css,ico,png,svg,woff2}"],
+        // Default is 2 MiB; the main JS bundle sits right at that edge and
+        // has tipped over it before (feature additions, not size regressions
+        // -- this is one file for the whole SPA, see the code-splitting
+        // warning at build time). Bump generously so a normal feature commit
+        // doesn't fail the Docker build again the next time it does.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         // No navigateFallback — server handles SPA routing.
         // This prevents the SW from intercepting navigation to /openclaw/.
         // Must be explicitly null to override VitePWA's default of "index.html".
