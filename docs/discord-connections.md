@@ -39,7 +39,7 @@ Claworc cannot create the Discord app itself. You need:
     "guilds": {
       "123456789012345678": {
         "channels": {
-          "234567890123456789": { "allow": true, "requireMention": true }
+          "234567890123456789": { "enabled": true, "requireMention": true }
         }
       },
       "999999999999999999": { "requireMention": true }

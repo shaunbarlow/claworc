@@ -12,7 +12,7 @@ func TestValidateDiscordConfigNormalizes(t *testing.T) {
 		Channels: []discordChannelRule{
 			{GuildID: " 123456789012345678 ", ChannelID: "#234567890123456789"},
 			{GuildID: "123456789012345678", ChannelID: "234567890123456789", RequireMention: &f}, // dup after normalization
-			{GuildID: "999999999999999999"}, // whole guild
+			{GuildID: "999999999999999999"},                                                      // whole guild
 		},
 	}
 	if err := validateDiscordConfig(&cfg); err != nil {
@@ -78,8 +78,8 @@ func TestRenderDiscordChannelsJSON(t *testing.T) {
 		t.Fatalf("expected 2 channels in guild, got %v", channels)
 	}
 	c1 := channels["234567890123456789"].(map[string]interface{})
-	if c1["allow"] != true || c1["requireMention"] != true {
-		t.Errorf("default channel entry should be allow+requireMention true, got %v", c1)
+	if c1["enabled"] != true || c1["requireMention"] != true {
+		t.Errorf("default channel entry should be enabled+requireMention true, got %v", c1)
 	}
 	c2 := channels["345678901234567890"].(map[string]interface{})
 	if c2["requireMention"] != false {
@@ -185,5 +185,82 @@ func TestValidateDiscordConfigDMAllowlist(t *testing.T) {
 	}
 	if len(kept.DMAllowFrom) != 1 {
 		t.Errorf("allowlist should be preserved under other policies, got %v", kept.DMAllowFrom)
+	}
+}
+
+// discordSchemaProperties mirrors the @openclaw/discord plugin's config schema
+// (channelConfigs.discord.schema in its openclaw.plugin.json), which is strict
+// -- every level sets additionalProperties:false, so one unknown key fails
+// validation for the *whole* config and the agent starts with no Discord at
+// all.
+//
+// This caught us once already: the bundled schema took `allow` on a guild
+// channel entry, the split-out package takes `enabled`, and we kept sending
+// `allow`. Re-derive after a plugin bump with:
+//
+//	npm view @openclaw/discord dist.tarball    # download, extract
+//	jq '.channelConfigs.discord.schema.properties | keys' openclaw.plugin.json
+var discordSchemaProperties = map[string]bool{
+	"enabled": true, "groupPolicy": true, "guilds": true,
+	"dmPolicy": true, "allowFrom": true, "token": true, "accounts": true,
+}
+
+var discordGuildProperties = map[string]bool{
+	"slug": true, "requireMention": true, "ignoreOtherMentions": true,
+	"tools": true, "toolsBySender": true, "reactionNotifications": true,
+	"users": true, "roles": true, "channels": true,
+}
+
+var discordGuildChannelProperties = map[string]bool{
+	"enabled": true, "requireMention": true, "ignoreOtherMentions": true,
+	"tools": true, "toolsBySender": true, "skills": true, "systemPrompt": true,
+	"users": true, "roles": true, "includeThreadStarter": true,
+	"autoThread": true, "autoThreadName": true, "autoArchiveDuration": true,
+}
+
+// TestRenderDiscordChannelsJSONMatchesPluginSchema renders every shape we can
+// produce and asserts each key is one the plugin accepts.
+func TestRenderDiscordChannelsJSONMatchesPluginSchema(t *testing.T) {
+	f := false
+	configs := []instanceDiscordConfig{
+		{Enabled: true, Channels: []discordChannelRule{{GuildID: "111111111111111111", ChannelID: "222222222222222222"}}},
+		{Enabled: true, Channels: []discordChannelRule{{GuildID: "111111111111111111", RequireMention: &f}}},
+		{Enabled: true, DMPolicy: "open"},
+		{Enabled: true, DMPolicy: "allowlist", DMAllowFrom: []string{"333333333333333333"}},
+		{Enabled: true, DMPolicy: "disabled"},
+		{Enabled: false},
+	}
+	for i, cfg := range configs {
+		rendered, err := renderDiscordChannelsJSON(cfg)
+		if err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		var block map[string]interface{}
+		if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+			t.Fatalf("case %d: %v", i, err)
+		}
+		for key := range block {
+			if !discordSchemaProperties[key] {
+				t.Errorf("case %d: channels.discord.%s is not in the plugin schema", i, key)
+			}
+		}
+		guilds, _ := block["guilds"].(map[string]interface{})
+		for gid, raw := range guilds {
+			guild, _ := raw.(map[string]interface{})
+			for key := range guild {
+				if !discordGuildProperties[key] {
+					t.Errorf("case %d: guilds.%s.%s is not in the plugin schema", i, gid, key)
+				}
+			}
+			chans, _ := guild["channels"].(map[string]interface{})
+			for cid, rawCh := range chans {
+				entry, _ := rawCh.(map[string]interface{})
+				for key := range entry {
+					if !discordGuildChannelProperties[key] {
+						t.Errorf("case %d: guilds.%s.channels.%s.%s is not in the plugin schema", i, gid, cid, key)
+					}
+				}
+			}
+		}
 	}
 }

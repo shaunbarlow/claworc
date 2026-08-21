@@ -174,8 +174,14 @@ func renderDiscordChannelsJSON(cfg instanceDiscordConfig) (string, error) {
 					channels = map[string]interface{}{}
 					guild["channels"] = channels
 				}
+				// "enabled", not "allow". The old bundled Discord schema took
+				// `allow`; the @openclaw/discord package's guild channel entry
+				// is strict (additionalProperties: false) and takes `enabled`,
+				// matching Slack. Sending `allow` fails validation for the
+				// entire config, not just this key, so the agent comes up with
+				// no Discord at all.
 				channels[rule.ChannelID] = map[string]interface{}{
-					"allow":          true,
+					"enabled":        true,
 					"requireMention": requireMention,
 				}
 			}
