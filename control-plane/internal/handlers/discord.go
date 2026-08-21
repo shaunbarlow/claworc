@@ -50,6 +50,11 @@ type instanceDiscordConfig struct {
 	// no pairing handshake, and everyone else is blocked. Ignored for every
 	// other policy.
 	DMAllowFrom []string `json:"dm_allow_from,omitempty"`
+	// AllowBots: "" (OpenClaw default, false -- bot-authored messages are
+	// ignored), "true" (bot messages trigger replies same as humans), or
+	// "mentions" (bot messages only trigger replies when they @-mention the
+	// bot). Maps onto OpenClaw's channels.discord.allowBots.
+	AllowBots string `json:"allow_bots,omitempty"`
 }
 
 func parseDiscordConfig(raw string) (instanceDiscordConfig, bool) {
@@ -143,6 +148,12 @@ func validateDiscordConfig(cfg *instanceDiscordConfig) error {
 	default:
 		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, allowlist, open, disabled", cfg.DMPolicy)
 	}
+
+	switch cfg.AllowBots {
+	case "", "true", "mentions":
+	default:
+		return fmt.Errorf("invalid allow_bots %q: must be one of \"\" (false), \"true\", \"mentions\"", cfg.AllowBots)
+	}
 	return nil
 }
 
@@ -155,6 +166,16 @@ func renderDiscordChannelsJSON(cfg instanceDiscordConfig) (string, error) {
 	block := map[string]interface{}{"enabled": cfg.Enabled}
 	if cfg.Enabled {
 		block["groupPolicy"] = "allowlist"
+		// AllowBots: OpenClaw's own default is false when the key is unset, so
+		// only write it for a non-default choice. "true" renders the boolean;
+		// "mentions" passes through as OpenClaw's string variant (bot messages
+		// only trigger a reply when they @-mention the bot).
+		switch cfg.AllowBots {
+		case "true":
+			block["allowBots"] = true
+		case "mentions":
+			block["allowBots"] = "mentions"
+		}
 		if len(cfg.Channels) > 0 {
 			guilds := map[string]map[string]interface{}{}
 			for _, rule := range cfg.Channels {
@@ -280,6 +301,7 @@ type instanceDiscordResponse struct {
 	Channels       []discordChannelRule `json:"channels"`
 	DMPolicy       string               `json:"dm_policy"`
 	DMAllowFrom    []string             `json:"dm_allow_from"`
+	AllowBots      string               `json:"allow_bots"`
 	HasBotToken    bool                 `json:"has_bot_token"`
 	BotTokenMasked string               `json:"bot_token_masked,omitempty"`
 	Restarting     bool                 `json:"restarting,omitempty"`
@@ -295,6 +317,7 @@ func discordResponseFor(inst database.Instance) instanceDiscordResponse {
 		Channels:    cfg.Channels,
 		DMPolicy:    cfg.DMPolicy,
 		DMAllowFrom: cfg.DMAllowFrom,
+		AllowBots:   cfg.AllowBots,
 	}
 	if resp.Channels == nil {
 		resp.Channels = []discordChannelRule{}
@@ -339,6 +362,7 @@ type instanceDiscordUpdateRequest struct {
 	Channels    *[]discordChannelRule `json:"channels"`
 	DMPolicy    *string               `json:"dm_policy"`
 	DMAllowFrom *[]string             `json:"dm_allow_from"`
+	AllowBots   *string               `json:"allow_bots"`
 	// Token: nil = keep current value, "" = remove, non-empty = set.
 	BotToken *string `json:"bot_token"`
 }
@@ -374,6 +398,9 @@ func UpdateInstanceDiscord(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DMAllowFrom != nil {
 		cfg.DMAllowFrom = *body.DMAllowFrom
+	}
+	if body.AllowBots != nil {
+		cfg.AllowBots = *body.AllowBots
 	}
 	if cfg.Channels == nil {
 		cfg.Channels = []discordChannelRule{}

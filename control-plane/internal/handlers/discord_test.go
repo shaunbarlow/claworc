@@ -41,6 +41,7 @@ func TestValidateDiscordConfigRejectsBadInput(t *testing.T) {
 		// policy -- an allowlist with no users is still rejected, but by a
 		// different rule (see TestValidateDiscordConfigDMAllowlist).
 		{Enabled: true, DMPolicy: "everyone"},
+		{Enabled: true, AllowBots: "always"},
 	}
 	for i, cfg := range cases {
 		if err := validateDiscordConfig(&cfg); err == nil {
@@ -144,6 +145,56 @@ func TestRenderDiscordChannelsJSONDMAllowlist(t *testing.T) {
 	}
 }
 
+func TestValidateDiscordConfigAllowBots(t *testing.T) {
+	for _, good := range []string{"", "true", "mentions"} {
+		cfg := instanceDiscordConfig{AllowBots: good}
+		if err := validateDiscordConfig(&cfg); err != nil {
+			t.Errorf("allow_bots %q: unexpected error: %v", good, err)
+		}
+	}
+	cfg := instanceDiscordConfig{AllowBots: "always"}
+	if err := validateDiscordConfig(&cfg); err == nil {
+		t.Error("expected an invalid allow_bots value to be rejected")
+	}
+}
+
+func TestRenderDiscordChannelsJSONAllowBots(t *testing.T) {
+	// Default ("") omits the key entirely -- OpenClaw's own default is false.
+	rendered, err := renderDiscordChannelsJSON(instanceDiscordConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var block map[string]interface{}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if _, ok := block["allowBots"]; ok {
+		t.Errorf("default allow_bots should omit the key, got %v", block)
+	}
+
+	rendered, err = renderDiscordChannelsJSON(instanceDiscordConfig{Enabled: true, AllowBots: "true"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if block["allowBots"] != true {
+		t.Errorf("allow_bots \"true\" should render allowBots: true, got %v", block["allowBots"])
+	}
+
+	rendered, err = renderDiscordChannelsJSON(instanceDiscordConfig{Enabled: true, AllowBots: "mentions"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if block["allowBots"] != "mentions" {
+		t.Errorf("allow_bots \"mentions\" should render allowBots: \"mentions\", got %v", block["allowBots"])
+	}
+}
+
 func TestValidateDiscordConfigDMAllowlist(t *testing.T) {
 	// Mentions are what you get from copying a user in Discord, so accept them
 	// and normalize down to the bare snowflake.
@@ -203,6 +254,7 @@ func TestValidateDiscordConfigDMAllowlist(t *testing.T) {
 var discordSchemaProperties = map[string]bool{
 	"enabled": true, "groupPolicy": true, "guilds": true,
 	"dmPolicy": true, "allowFrom": true, "token": true, "accounts": true,
+	"allowBots": true,
 }
 
 var discordGuildProperties = map[string]bool{

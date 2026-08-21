@@ -126,11 +126,29 @@ while reading as "some users are allowed", which is `disabled` under the wrong
 name. The list is preserved when you switch to another policy, so toggling in
 the UI does not discard it.
 
+## Bot-authored messages
+
+`allow_bots` maps onto OpenClaw's `channels.slack.allowBots`, which defaults
+to `false` (bot-authored messages never trigger a reply, avoiding bot-to-bot
+loops):
+
+| `allow_bots` | Behavior |
+|---|---|
+| `""` | Default. Bot-authored messages are ignored entirely. |
+| `"true"` | Bot messages are treated the same as human messages. |
+
+Unlike Discord, OpenClaw's Slack channel has no `"mentions"` variant — it is a
+plain boolean. This is a config-only change (like channels/DM policy) — no
+token involved, so it is pushed live over SSH with a gateway restart rather
+than a container restart. OpenClaw applies its own bot-loop protection
+automatically whenever `allowBots` lets bot messages through.
+
 ## UI
 
 - **Agent → Settings → Slack** card (next to Webhook): enable toggle, masked
   token inputs (leave blank to keep; remove via the Environment Variables
-  card), channel list with per-channel "require @-mention", DM policy select.
+  card), channel list with per-channel "require @-mention", DM policy select,
+  bot-authored-message select.
 - **Create Agent form**: an optional Slack card with the same fields.
 
 ## Scope / deferred

@@ -92,6 +92,42 @@ export default function DiscordChannelsEditor({ channels, onChange, disabled }: 
 }
 
 /**
+ * Bot-message handling. OpenClaw ignores bot-authored messages by default
+ * (allowBots unset/false) to avoid bot-to-bot loops. "mentions" is the safer
+ * middle ground when another bot needs to be answered — it only responds when
+ * that bot @-mentions this one.
+ */
+export function DiscordAllowBotsSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-700 mb-1">Bot-authored messages</label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+      >
+        <option value="">Ignore (default) — messages from other bots are never answered</option>
+        <option value="mentions">Only when @-mentioned — respond to bot messages that @-mention this bot</option>
+        <option value="true">Always — respond to bot messages the same as humans</option>
+      </select>
+      <p className="text-[11px] text-gray-500 mt-0.5">
+        Enabling this risks bot-to-bot reply loops; OpenClaw applies loop protection automatically
+        whenever bot messages are allowed through.
+      </p>
+    </div>
+  );
+}
+
+/**
  * DM access control. The "allowlist" policy names specific Discord users who
  * are answered straight away with no pairing handshake, so its user list is
  * part of the same control rather than a separate card — picking the policy
@@ -110,6 +146,7 @@ export function DiscordDMPolicySelect({
   onAllowFromChange: (users: string[]) => void;
   disabled?: boolean;
 }) {
+
   const isAllowlist = value === "allowlist";
   return (
     <div>

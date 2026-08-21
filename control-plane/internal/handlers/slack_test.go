@@ -46,6 +46,45 @@ func TestValidateSlackConfigRejectsBadDMPolicy(t *testing.T) {
 	}
 }
 
+func TestValidateSlackConfigAllowBots(t *testing.T) {
+	for _, good := range []string{"", "true"} {
+		cfg := instanceSlackConfig{AllowBots: good}
+		if err := validateSlackConfig(&cfg); err != nil {
+			t.Errorf("allow_bots %q: unexpected error: %v", good, err)
+		}
+	}
+	cfg := instanceSlackConfig{AllowBots: "mentions"}
+	if err := validateSlackConfig(&cfg); err == nil {
+		t.Error("expected an invalid allow_bots value to be rejected (Slack has no \"mentions\" variant)")
+	}
+}
+
+func TestRenderSlackChannelsJSONAllowBots(t *testing.T) {
+	// Default ("") omits the key entirely -- OpenClaw's own default is false.
+	rendered, err := renderSlackChannelsJSON(instanceSlackConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var block map[string]interface{}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if _, ok := block["allowBots"]; ok {
+		t.Errorf("default allow_bots should omit the key, got %v", block)
+	}
+
+	rendered, err = renderSlackChannelsJSON(instanceSlackConfig{Enabled: true, AllowBots: "true"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if block["allowBots"] != true {
+		t.Errorf("allow_bots \"true\" should render allowBots: true, got %v", block["allowBots"])
+	}
+}
+
 func TestRenderSlackChannelsJSON(t *testing.T) {
 	f := false
 	cfg := instanceSlackConfig{

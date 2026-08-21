@@ -93,6 +93,23 @@ The token restart is not decided by "did the row change" — it is decided by
 `EnsureEnvPropagated`, which compares the live container's environment against
 what the database says it should be. See `docs/env-propagation.md`.
 
+## Bot-authored messages
+
+`allow_bots` maps onto OpenClaw's `channels.discord.allowBots`, which defaults
+to `false` (bot-authored messages never trigger a reply, avoiding bot-to-bot
+loops):
+
+| `allow_bots` | Behavior |
+|---|---|
+| `""` | Default. Bot-authored messages are ignored entirely. |
+| `"mentions"` | Bot messages only trigger a reply when they @-mention this bot. |
+| `"true"` | Bot messages are treated the same as human messages. |
+
+This is a config-only change (like channels/DM policy) — no token involved, so
+it is pushed live over SSH with a gateway restart rather than a container
+restart. OpenClaw applies its own bot-loop protection automatically whenever
+`allowBots` lets bot messages through.
+
 ## Scope / deferred
 
 Default Discord account only. Multi-account (`channels.discord.accounts.*`),

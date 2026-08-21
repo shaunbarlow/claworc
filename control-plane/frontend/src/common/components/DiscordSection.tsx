@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { useInstanceDiscord, useUpdateInstanceDiscord } from "@common/hooks/useDiscord";
 import type { DiscordChannelRule, InstanceDiscordUpdatePayload } from "@common/types/discord";
 import { successToast, errorToast, infoToast } from "@common/utils/toast";
-import DiscordChannelsEditor, { DiscordDMPolicySelect } from "@common/components/DiscordChannelsEditor";
+import DiscordChannelsEditor, {
+  DiscordAllowBotsSelect,
+  DiscordDMPolicySelect,
+} from "@common/components/DiscordChannelsEditor";
 import ChannelPluginStatusLine from "@common/components/ChannelPluginStatus";
 
 interface Props {
@@ -22,6 +25,7 @@ export default function DiscordSection({ instanceId }: Props) {
   const [channels, setChannels] = useState<DiscordChannelRule[]>([]);
   const [dmPolicy, setDmPolicy] = useState("");
   const [dmAllowFrom, setDmAllowFrom] = useState<string[]>([]);
+  const [allowBots, setAllowBots] = useState("");
   const [botToken, setBotToken] = useState("");
   const [dirty, setDirty] = useState(false);
 
@@ -31,6 +35,7 @@ export default function DiscordSection({ instanceId }: Props) {
     setChannels(data.channels);
     setDmPolicy(data.dm_policy ?? "");
     setDmAllowFrom(data.dm_allow_from ?? []);
+    setAllowBots(data.allow_bots ?? "");
   }, [data, dirty]);
 
   const markDirty = () => setDirty(true);
@@ -41,6 +46,7 @@ export default function DiscordSection({ instanceId }: Props) {
       channels: channels.filter((c) => c.guild_id.trim() !== ""),
       dm_policy: dmPolicy,
       dm_allow_from: dmAllowFrom.filter((u) => u.trim() !== ""),
+      allow_bots: allowBots,
     };
     // The token is only sent when the user typed one — an empty field means
     // "keep the current token" (remove via the Environment Variables card).
@@ -155,6 +161,15 @@ export default function DiscordSection({ instanceId }: Props) {
           allowFrom={dmAllowFrom}
           onAllowFromChange={(users) => {
             setDmAllowFrom(users);
+            markDirty();
+          }}
+        />
+
+        <DiscordAllowBotsSelect
+          value={allowBots}
+          disabled={!enabled}
+          onChange={(v) => {
+            setAllowBots(v);
             markDirty();
           }}
         />

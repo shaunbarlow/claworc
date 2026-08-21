@@ -64,6 +64,10 @@ type instanceSlackConfig struct {
 	// no pairing handshake, and everyone else is blocked. Ignored for every
 	// other policy.
 	DMAllowFrom []string `json:"dm_allow_from,omitempty"`
+	// AllowBots: "" (OpenClaw default, false -- bot-authored messages are
+	// ignored) or "true" (bot messages trigger replies same as humans). Maps
+	// onto OpenClaw's channels.slack.allowBots.
+	AllowBots string `json:"allow_bots,omitempty"`
 }
 
 func parseSlackConfig(raw string) (instanceSlackConfig, bool) {
@@ -134,6 +138,12 @@ func validateSlackConfig(cfg *instanceSlackConfig) error {
 	default:
 		return fmt.Errorf("invalid dm_policy %q: must be one of pairing, allowlist, open, disabled", cfg.DMPolicy)
 	}
+
+	switch cfg.AllowBots {
+	case "", "true":
+	default:
+		return fmt.Errorf("invalid allow_bots %q: must be \"\" (false) or \"true\"", cfg.AllowBots)
+	}
 	return nil
 }
 
@@ -145,6 +155,11 @@ func renderSlackChannelsJSON(cfg instanceSlackConfig) (string, error) {
 	block := map[string]interface{}{"enabled": cfg.Enabled}
 	if cfg.Enabled {
 		block["groupPolicy"] = "allowlist"
+		// AllowBots: OpenClaw's own default is false when the key is unset, so
+		// only write it for the non-default choice.
+		if cfg.AllowBots == "true" {
+			block["allowBots"] = true
+		}
 		if len(cfg.Channels) > 0 {
 			channels := make(map[string]interface{}, len(cfg.Channels))
 			for _, ch := range cfg.Channels {
@@ -247,6 +262,7 @@ type instanceSlackResponse struct {
 	Channels       []slackChannelEntry `json:"channels"`
 	DMPolicy       string              `json:"dm_policy"`
 	DMAllowFrom    []string            `json:"dm_allow_from"`
+	AllowBots      string              `json:"allow_bots"`
 	HasBotToken    bool                `json:"has_bot_token"`
 	HasAppToken    bool                `json:"has_app_token"`
 	BotTokenMasked string              `json:"bot_token_masked,omitempty"`
@@ -264,6 +280,7 @@ func slackResponseFor(inst database.Instance) instanceSlackResponse {
 		Channels:    cfg.Channels,
 		DMPolicy:    cfg.DMPolicy,
 		DMAllowFrom: cfg.DMAllowFrom,
+		AllowBots:   cfg.AllowBots,
 	}
 	if resp.Channels == nil {
 		resp.Channels = []slackChannelEntry{}
@@ -330,6 +347,7 @@ type instanceSlackUpdateRequest struct {
 	Channels    *[]slackChannelEntry `json:"channels"`
 	DMPolicy    *string              `json:"dm_policy"`
 	DMAllowFrom *[]string            `json:"dm_allow_from"`
+	AllowBots   *string              `json:"allow_bots"`
 	// Tokens: nil = keep current value, "" = remove, non-empty = set.
 	BotToken *string `json:"bot_token"`
 	AppToken *string `json:"app_token"`
@@ -366,6 +384,9 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.DMAllowFrom != nil {
 		cfg.DMAllowFrom = *body.DMAllowFrom
+	}
+	if body.AllowBots != nil {
+		cfg.AllowBots = *body.AllowBots
 	}
 	if cfg.Channels == nil {
 		cfg.Channels = []slackChannelEntry{}

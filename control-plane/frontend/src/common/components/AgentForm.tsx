@@ -15,8 +15,14 @@ import AffinityEditor from "@common/components/AffinityEditor";
 import PortsEditor from "@common/components/PortsEditor";
 import StickyActionBar from "@common/components/StickyActionBar";
 import ConfirmDialog from "@common/components/ConfirmDialog";
-import SlackChannelsEditor, { SlackDMPolicySelect } from "@common/components/SlackChannelsEditor";
-import DiscordChannelsEditor, { DiscordDMPolicySelect } from "@common/components/DiscordChannelsEditor";
+import SlackChannelsEditor, {
+  SlackAllowBotsSelect,
+  SlackDMPolicySelect,
+} from "@common/components/SlackChannelsEditor";
+import DiscordChannelsEditor, {
+  DiscordAllowBotsSelect,
+  DiscordDMPolicySelect,
+} from "@common/components/DiscordChannelsEditor";
 import type { InstanceCreatePayload, PortSpec, Toleration } from "@common/types/instance";
 import type { SlackChannel } from "@common/types/slack";
 import type { DiscordChannelRule } from "@common/types/discord";
@@ -141,6 +147,7 @@ export default function AgentForm({
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
   const [slackDmPolicy, setSlackDmPolicy] = useState("");
   const [slackDmAllowFrom, setSlackDmAllowFrom] = useState<string[]>([]);
+  const [slackAllowBots, setSlackAllowBots] = useState("");
 
   // Discord connection (optional): same contract as Slack, single bot token
   // riding the encrypted env-var path server-side (DISCORD_BOT_TOKEN).
@@ -149,6 +156,7 @@ export default function AgentForm({
   const [discordChannels, setDiscordChannels] = useState<DiscordChannelRule[]>([]);
   const [discordDmPolicy, setDiscordDmPolicy] = useState("");
   const [discordDmAllowFrom, setDiscordDmAllowFrom] = useState<string[]>([]);
+  const [discordAllowBots, setDiscordAllowBots] = useState("");
 
   const [showNoModelsWarning, setShowNoModelsWarning] = useState(false);
 
@@ -206,6 +214,7 @@ export default function AgentForm({
         channels: slackChannels.filter((c) => c.id.trim() !== ""),
         dm_policy: slackDmPolicy || undefined,
         dm_allow_from: slackDmAllowFrom.filter((u) => u.trim() !== ""),
+        allow_bots: slackAllowBots || undefined,
         bot_token: slackBotToken.trim() || undefined,
         app_token: slackAppToken.trim() || undefined,
       };
@@ -216,6 +225,7 @@ export default function AgentForm({
         channels: discordChannels.filter((c) => c.guild_id.trim() !== ""),
         dm_policy: discordDmPolicy || undefined,
         dm_allow_from: discordDmAllowFrom.filter((u) => u.trim() !== ""),
+        allow_bots: discordAllowBots || undefined,
         bot_token: discordBotToken.trim() || undefined,
       };
     }
@@ -483,6 +493,7 @@ export default function AgentForm({
                 allowFrom={slackDmAllowFrom}
                 onAllowFromChange={setSlackDmAllowFrom}
               />
+              <SlackAllowBotsSelect value={slackAllowBots} onChange={setSlackAllowBots} />
             </>
           )}
         </div>
@@ -538,6 +549,7 @@ export default function AgentForm({
                 allowFrom={discordDmAllowFrom}
                 onAllowFromChange={setDiscordDmAllowFrom}
               />
+              <DiscordAllowBotsSelect value={discordAllowBots} onChange={setDiscordAllowBots} />
             </>
           )}
         </div>

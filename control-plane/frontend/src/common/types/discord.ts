@@ -17,6 +17,8 @@ export interface InstanceDiscord {
   dm_policy: string;
   /** Discord user IDs allowed to DM the agent under the "allowlist" policy. */
   dm_allow_from: string[];
+  /** "" (default, false), "true", or "mentions" (only when the bot message @-mentions the bot). */
+  allow_bots: string;
   has_bot_token: boolean;
   /** Masked token for display (e.g. "****abcd"), only when a token is set. */
   bot_token_masked?: string;
@@ -32,6 +34,7 @@ export interface InstanceDiscordUpdatePayload {
   channels?: DiscordChannelRule[];
   dm_policy?: string;
   dm_allow_from?: string[];
+  allow_bots?: string;
   /** Token: omit = keep, "" = remove, non-empty = set. */
   bot_token?: string;
 }
@@ -42,5 +45,6 @@ export interface DiscordCreateConfig {
   channels?: DiscordChannelRule[];
   dm_policy?: string;
   dm_allow_from?: string[];
+  allow_bots?: string;
   bot_token?: string;
 }

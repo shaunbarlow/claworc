@@ -83,6 +83,39 @@ export default function SlackChannelsEditor({ channels, onChange, disabled }: Pr
 }
 
 /**
+ * Bot-message handling. OpenClaw ignores bot-authored messages by default
+ * (allowBots unset/false) to avoid bot-to-bot loops.
+ */
+export function SlackAllowBotsSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-700 mb-1">Bot-authored messages</label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+      >
+        <option value="">Ignore (default) — messages from other bots are never answered</option>
+        <option value="true">Always — respond to bot messages the same as humans</option>
+      </select>
+      <p className="text-[11px] text-gray-500 mt-0.5">
+        Enabling this risks bot-to-bot reply loops; OpenClaw applies loop protection automatically
+        whenever bot messages are allowed through.
+      </p>
+    </div>
+  );
+}
+
+/**
  * DM access control. The "allowlist" policy names specific Slack users who
  * are answered straight away with no pairing handshake, so its user list is
  * part of the same control rather than a separate card — picking the policy

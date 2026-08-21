@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { useInstanceSlack, useUpdateInstanceSlack } from "@common/hooks/useSlack";
 import type { InstanceSlackUpdatePayload, SlackChannel } from "@common/types/slack";
 import { successToast, errorToast, infoToast } from "@common/utils/toast";
-import SlackChannelsEditor, { SlackDMPolicySelect } from "@common/components/SlackChannelsEditor";
+import SlackChannelsEditor, {
+  SlackAllowBotsSelect,
+  SlackDMPolicySelect,
+} from "@common/components/SlackChannelsEditor";
 import ChannelPluginStatusLine from "@common/components/ChannelPluginStatus";
 
 interface Props {
@@ -22,6 +25,7 @@ export default function SlackSection({ instanceId }: Props) {
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [dmPolicy, setDmPolicy] = useState("");
   const [dmAllowFrom, setDmAllowFrom] = useState<string[]>([]);
+  const [allowBots, setAllowBots] = useState("");
   const [botToken, setBotToken] = useState("");
   const [appToken, setAppToken] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -32,6 +36,7 @@ export default function SlackSection({ instanceId }: Props) {
     setChannels(data.channels);
     setDmPolicy(data.dm_policy ?? "");
     setDmAllowFrom(data.dm_allow_from ?? []);
+    setAllowBots(data.allow_bots ?? "");
   }, [data, dirty]);
 
   const markDirty = () => setDirty(true);
@@ -42,6 +47,7 @@ export default function SlackSection({ instanceId }: Props) {
       channels: channels.filter((c) => c.id.trim() !== ""),
       dm_policy: dmPolicy,
       dm_allow_from: dmAllowFrom.filter((u) => u.trim() !== ""),
+      allow_bots: allowBots,
     };
     // Tokens are only sent when the user typed one — an empty field means
     // "keep the current token" (remove via the Environment Variables card).
@@ -161,6 +167,15 @@ export default function SlackSection({ instanceId }: Props) {
           allowFrom={dmAllowFrom}
           onAllowFromChange={(users) => {
             setDmAllowFrom(users);
+            markDirty();
+          }}
+        />
+
+        <SlackAllowBotsSelect
+          value={allowBots}
+          disabled={!enabled}
+          onChange={(v) => {
+            setAllowBots(v);
             markDirty();
           }}
         />
