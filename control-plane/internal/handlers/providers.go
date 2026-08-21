@@ -131,9 +131,24 @@ func proxyCatalog(w http.ResponseWriter, path string) {
 	w.Write(entry.body)
 }
 
-// GetCatalogProviders proxies GET /providers/ from the catalog API.
+// GetCatalogProviders returns the merged catalog: the live claworc.com/providers
+// feed with any hardcodedCatalogOverrides entries spliced in (see
+// applyCatalogOverrides). Not a raw proxy of the feed response -- every caller
+// needs the override applied, so this always goes through the parsed path
+// rather than passing the live feed's bytes straight through.
 func GetCatalogProviders(w http.ResponseWriter, r *http.Request) {
-	proxyCatalog(w, "/")
+	entries, err := ensureRootCatalog()
+	if err != nil {
+		http.Error(w, `{"error":"catalog unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	body, err := json.Marshal(entries)
+	if err != nil {
+		http.Error(w, `{"error":"catalog encode error"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
 }
 
 // GetCatalogProviderDetail derives a single provider from the cached root catalog.
@@ -168,7 +183,11 @@ func getCatalogEntryByKey(key string) (*catalogRootEntry, error) {
 	return nil, nil
 }
 
-// ensureRootCatalog returns parsed root catalog entries, using cache if valid.
+// ensureRootCatalog returns parsed root catalog entries, using cache if valid,
+// with hardcodedCatalogOverrides applied. The cache itself stores the raw live
+// feed response (so a force-refresh in getCatalogRoot has an unmodified body
+// to work from); overrides are applied here on every read instead of baked
+// into the cached bytes.
 func ensureRootCatalog() ([]catalogRootEntry, error) {
 	catalogCacheMu.RLock()
 	entry := catalogCache["/"]
@@ -182,7 +201,7 @@ func ensureRootCatalog() ([]catalogRootEntry, error) {
 	if err := json.Unmarshal(entry.body, &entries); err != nil {
 		return nil, err
 	}
-	return entries, nil
+	return applyCatalogOverrides(entries), nil
 }
 
 // catalogRootModel is one model entry from the catalog root response.
@@ -209,6 +228,94 @@ type catalogRootEntry struct {
 	APIFormat string             `json:"api_format"`
 	BaseURL   string             `json:"base_url"`
 	Models    []catalogRootModel `json:"models"`
+}
+
+// hardcodedCatalogOverrides holds providers Claworc pins locally instead of
+// trusting the live claworc.com/providers feed. The feed drifted out of date
+// for Anthropic (still listing the 4.6 generation -- opus-4-6/sonnet-4-6/
+// haiku-4-5 -- after Opus 5 and Sonnet 5 shipped), so Anthropic is pinned
+// here, verified directly against Anthropic's own docs
+// (platform.claude.com/docs/en/about-claude/models/overview and .../pricing,
+// checked 2026-08-21). Every other provider keeps coming from the live feed
+// unchanged -- pinning is per-provider, not a wholesale freeze, because nothing
+// here confirms the other 23 entries are also stale.
+//
+// Update this block (and the "checked" date above) when Anthropic ships a new
+// model or changes pricing; there is no live source to sync it from anymore.
+var hardcodedCatalogOverrides = map[string]catalogRootEntry{
+	"anthropic": {
+		Name:      "anthropic",
+		Label:     "Anthropic",
+		IconKey:   "anthropic",
+		APIFormat: "anthropic-messages",
+		BaseURL:   "https://api.anthropic.com/",
+		Models: []catalogRootModel{
+			{
+				ModelID: "claude-opus-5", ModelName: "Claude Opus 5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 5, OutputCost: 25, CachedReadCost: 0.5, CachedWriteCost: 6.25,
+				Tag: "flagship", Description: "For complex agentic coding and enterprise work",
+			},
+			{
+				ModelID: "claude-sonnet-5", ModelName: "Claude Sonnet 5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 2, OutputCost: 10, CachedReadCost: 0.2, CachedWriteCost: 2.5,
+				Tag: "balanced", Description: "The best combination of speed and intelligence",
+			},
+			{
+				ModelID: "claude-haiku-4-5", ModelName: "Claude Haiku 4.5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(200000), MaxTokens: catalogIntPtr(64000),
+				InputCost: 1, OutputCost: 5, CachedReadCost: 0.1, CachedWriteCost: 1.25,
+				Tag: "speed", Description: "The fastest model with near-frontier intelligence",
+			},
+			{
+				ModelID: "claude-opus-4-8", ModelName: "Claude Opus 4.8",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 5, OutputCost: 25, CachedReadCost: 0.5, CachedWriteCost: 6.25,
+				Tag: "legacy", Description: "Previous-generation Opus, kept for compatibility",
+			},
+			{
+				ModelID: "claude-opus-4-7", ModelName: "Claude Opus 4.7",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 5, OutputCost: 25, CachedReadCost: 0.5, CachedWriteCost: 6.25,
+				Tag: "legacy", Description: "Previous-generation Opus, kept for compatibility",
+			},
+		},
+	},
+}
+
+func catalogIntPtr(v int) *int { return &v }
+
+// applyCatalogOverrides replaces any live-feed entry whose name matches a key
+// in hardcodedCatalogOverrides with the pinned entry, and appends the pinned
+// entry if the live feed omitted that provider entirely (e.g. if Anthropic
+// were ever dropped from the feed, Claworc would still offer it). Every other
+// entry from the live feed passes through unchanged.
+func applyCatalogOverrides(entries []catalogRootEntry) []catalogRootEntry {
+	if len(hardcodedCatalogOverrides) == 0 {
+		return entries
+	}
+	seen := make(map[string]bool, len(hardcodedCatalogOverrides))
+	result := make([]catalogRootEntry, 0, len(entries)+len(hardcodedCatalogOverrides))
+	for _, e := range entries {
+		if override, ok := hardcodedCatalogOverrides[e.Name]; ok {
+			result = append(result, override)
+			seen[e.Name] = true
+			continue
+		}
+		result = append(result, e)
+	}
+	for name, override := range hardcodedCatalogOverrides {
+		if !seen[name] {
+			result = append(result, override)
+		}
+	}
+	return result
 }
 
 // catalogModelToProviderModel converts a catalogRootModel to a database.ProviderModel.
@@ -262,7 +369,7 @@ func getCatalogRoot() ([]catalogRootEntry, error) {
 	if err := json.Unmarshal(body, &entries); err != nil {
 		return nil, err
 	}
-	return entries, nil
+	return applyCatalogOverrides(entries), nil
 }
 
 // getCatalogModels returns ProviderModel entries for a catalog provider,
