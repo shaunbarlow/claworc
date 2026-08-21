@@ -408,6 +408,20 @@ func main() {
 			r.Get("/instances/{id}/discord", handlers.GetInstanceDiscord)
 			r.Put("/instances/{id}/discord", handlers.UpdateInstanceDiscord)
 
+			// Plugins (per-instance) — generic install/enable/disable/config for
+			// any OpenClaw plugin (npm spec, clawhub:<package>, or git URL), not
+			// just the two channel plugins above. Read is CanAccessInstance;
+			// mutations (install/enable/disable/uninstall/config write) are
+			// CanMutateInstance (admin or team manager), enforced inside each
+			// handler so team users can still see what is installed.
+			r.Get("/instances/{id}/plugins", handlers.ListInstancePlugins)
+			r.Post("/instances/{id}/plugins", handlers.InstallInstancePlugin)
+			r.Post("/instances/{id}/plugins/{pluginId}/enable", handlers.EnableInstancePlugin)
+			r.Post("/instances/{id}/plugins/{pluginId}/disable", handlers.DisableInstancePlugin)
+			r.Delete("/instances/{id}/plugins/{pluginId}", handlers.UninstallInstancePlugin)
+			r.Get("/instances/{id}/plugins/{pluginId}/config", handlers.GetInstancePluginConfig)
+			r.Put("/instances/{id}/plugins/{pluginId}/config", handlers.PutInstancePluginConfig)
+
 			// Chat WebSocket
 			r.Get("/instances/{id}/chat", handlers.ChatProxy)
 

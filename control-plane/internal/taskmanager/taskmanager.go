@@ -23,6 +23,8 @@ const (
 	TaskInstanceClone       TaskType = "instance.clone"
 	TaskBackupCreate        TaskType = "backup.create"
 	TaskSkillDeploy         TaskType = "skill.deploy"
+	TaskPluginInstall       TaskType = "plugin.install"
+	TaskPluginUninstall     TaskType = "plugin.uninstall"
 	// Browser-pod lifecycle tasks (on-demand browser feature).
 	TaskBrowserSpawn   TaskType = "browser.spawn"
 	TaskBrowserMigrate TaskType = "browser.migrate"
