@@ -106,26 +106,34 @@ func TestConfigureInstance_ModelSet(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"claude-3-5-sonnet"}, nil, 0)
 
-	if len(inst.calls) < 4 {
-		t.Fatalf("expected at least 4 calls (model set + allowlist unset + allowlist set + gateway stop), got %d", len(inst.calls))
+	if len(inst.calls) < 3 {
+		t.Fatalf("expected at least 3 calls (model set + allowlist set + gateway stop), got %d", len(inst.calls))
 	}
 	// First call: config set agents.defaults.model
 	call0 := inst.calls[0]
 	if call0[0] != "config" || call0[1] != "set" || call0[2] != "agents.defaults.model" {
 		t.Errorf("unexpected first call: %v", call0)
 	}
-	// Second call: config unset agents.defaults.models (clear before re-setting)
+	// Second call: config set agents.defaults.models (allowlist). No preceding
+	// `unset` -- see ConfigureInstance: unsetting is a separate write that
+	// OpenClaw's size-drop guard rejects, and a failure after it lands leaves
+	// the agent with no allowlist at all.
 	call1 := inst.calls[1]
-	if call1[0] != "config" || call1[1] != "unset" || call1[2] != "agents.defaults.models" {
+	if call1[0] != "config" || call1[1] != "set" || call1[2] != "agents.defaults.models" {
 		t.Errorf("unexpected second call: %v", call1)
 	}
-	// Third call: config set agents.defaults.models (allowlist)
-	call2 := inst.calls[2]
-	if call2[0] != "config" || call2[1] != "set" || call2[2] != "agents.defaults.models" {
-		t.Errorf("unexpected third call: %v", call2)
+	if !strings.Contains(call1[3], "claude-3-5-sonnet") {
+		t.Errorf("models allowlist should contain claude-3-5-sonnet, got: %s", call1[3])
 	}
-	if !strings.Contains(call2[3], "claude-3-5-sonnet") {
-		t.Errorf("models allowlist should contain claude-3-5-sonnet, got: %s", call2[3])
+	for _, c := range inst.calls {
+		if c[1] == "unset" {
+			t.Errorf("config unset must not be used; got %v", c)
+		}
+	}
+	// The allowlist replaces de-selected models, which OpenClaw only permits
+	// with --replace on this protected map path.
+	if !containsArg(call1, "--replace") {
+		t.Errorf("allowlist set must pass --replace, got %v", call1)
 	}
 	// Last call must be gateway stop
 	last := inst.calls[len(inst.calls)-1]
@@ -160,16 +168,34 @@ func TestConfigureInstance_ProvidersSet(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		nil, providers, 40001)
 
-	// Should have: providers unset + providers set + gateway stop
-	if len(inst.calls) < 3 {
-		t.Fatalf("expected at least 3 calls, got %d", len(inst.calls))
+	// Should have: providers set + gateway stop. One atomic write, no unset --
+	// `unset models.providers` is rejected by OpenClaw's size-drop guard on any
+	// realistic config, and when it does land a failing set leaves the agent
+	// with `"models": {}`.
+	if len(inst.calls) < 2 {
+		t.Fatalf("expected at least 2 calls, got %d", len(inst.calls))
 	}
-	if c := inst.calls[0]; c[0] != "config" || c[1] != "unset" || c[2] != "models.providers" {
-		t.Errorf("expected providers unset first, got %v", c)
+	if c := inst.calls[0]; c[0] != "config" || c[1] != "set" || c[2] != "models.providers" {
+		t.Errorf("expected providers set first, got %v", c)
 	}
-	if c := inst.calls[1]; c[0] != "config" || c[1] != "set" || c[2] != "models.providers" {
-		t.Errorf("expected providers set second, got %v", c)
+	if !containsArg(inst.calls[0], "--replace") {
+		t.Errorf("providers set must pass --replace, got %v", inst.calls[0])
 	}
+	for _, c := range inst.calls {
+		if c[1] == "unset" {
+			t.Errorf("config unset must not be used; got %v", c)
+		}
+	}
+}
+
+// containsArg reports whether an ExecOpenclaw arg list contains flag.
+func containsArg(call []string, flag string) bool {
+	for _, a := range call {
+		if a == flag {
+			return true
+		}
+	}
+	return false
 }
 
 func TestConfigureInstance_NilModelsEmptySlice(t *testing.T) {
@@ -385,8 +411,12 @@ func TestConfigureInstance_CatalogProviderWithCachedModelsFiltered(t *testing.T)
 	}
 }
 
-func TestConfigureInstance_CatalogProviderEmptyWhenNoneSelected(t *testing.T) {
-	// Catalog provider with no models selected in effective list → models: []
+func TestConfigureInstance_CatalogProviderFallsBackWhenNoneSelected(t *testing.T) {
+	// Catalog provider with no models selected in the effective list must still
+	// declare its full catalog. Declaring `models: []` gives OpenClaw a provider
+	// it cannot route through, and the resulting config shrink trips OpenClaw's
+	// size-drop write guard, which rejects the models.providers write outright
+	// and leaves the agent with `"models": {}`.
 	orig := getCatalogModels
 	getCatalogModels = func(catalogKey string) []database.ProviderModel {
 		return []database.ProviderModel{
@@ -414,10 +444,78 @@ func TestConfigureInstance_CatalogProviderEmptyWhenNoneSelected(t *testing.T) {
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")
 	}
-	if strings.Contains(providersJSON, "claude-opus-4-6") {
-		t.Errorf("no models should appear when none are selected; got: %s", providersJSON)
+	if !strings.Contains(providersJSON, "claude-opus-4-6") {
+		t.Errorf("catalog models should be declared when none are selected; got: %s", providersJSON)
 	}
-	if !strings.Contains(providersJSON, `"models":[]`) {
-		t.Errorf("expected empty models array; got: %s", providersJSON)
+	if strings.Contains(providersJSON, `"models":[]`) {
+		t.Errorf("a provider must never be declared with an empty model list; got: %s", providersJSON)
+	}
+}
+
+// TestConfigureInstance_NewProviderDoesNotEmptyConfig pins the regression that
+// made an agent's `models` config go empty after a new provider was added.
+//
+// Two defects combined. buildOpenClawProvidersJSON filtered every catalog
+// provider's model list down to the agent's selected models, so a provider
+// nobody had picked models for yet -- the normal state right after adding one --
+// was declared as `"models": []`. ConfigureInstance then wrote the map with
+// `config unset models.providers` followed by `config set`. OpenClaw rejects
+// both of those writes: `unset` is a >50% config shrink and trips the size-drop
+// write guard, and a plain `set` on a protected map path is refused outright
+// ("Refusing to replace models.providers; it would remove existing entries").
+// When the unset did land and the set failed, the agent was left with
+// `"models": {}` -- no providers at all -- and every later reconfigure repeated
+// the same failing pair, so it never recovered.
+func TestConfigureInstance_NewProviderDoesNotEmptyConfig(t *testing.T) {
+	orig := getCatalogModels
+	getCatalogModels = func(catalogKey string) []database.ProviderModel {
+		return []database.ProviderModel{{ID: "gpt-5", Name: "GPT-5"}}
+	}
+	defer func() { getCatalogModels = orig }()
+
+	inst := &mockInstance{}
+	providers := map[string]GatewayProvider{
+		// Already configured, one model selected on the agent.
+		"anthropic": {
+			Key: "vk-a", APIType: "anthropic-messages", CatalogKey: "anthropic",
+			Models: []database.ProviderModel{
+				{ID: "claude-sonnet-5", Name: "Claude Sonnet 5"},
+				{ID: "claude-opus-5", Name: "Claude Opus 5"},
+			},
+		},
+		// Just added; nothing selected for it yet.
+		"openai": {Key: "vk-b", APIType: "openai-completions", CatalogKey: "openai"},
+	}
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
+		[]string{"anthropic/claude-sonnet-5"}, providers, 40001)
+
+	var providersJSON string
+	for _, c := range inst.calls {
+		if c[1] == "unset" {
+			t.Errorf("config unset must not be used -- OpenClaw rejects the shrink; got %v", c)
+		}
+		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
+			providersJSON = c[3]
+			if !containsArg(c, "--replace") {
+				t.Errorf("providers set must pass --replace, got %v", c)
+			}
+		}
+	}
+	if providersJSON == "" {
+		t.Fatal("models.providers call not found")
+	}
+	if strings.Contains(providersJSON, `"models":[]`) {
+		t.Fatalf("no provider may be declared with an empty model list; got: %s", providersJSON)
+	}
+	// The agent's explicit selection still wins for the provider it covers.
+	if strings.Contains(providersJSON, "claude-opus-5") {
+		t.Errorf("de-selected opus should not be declared; got: %s", providersJSON)
+	}
+	if !strings.Contains(providersJSON, "claude-sonnet-5") {
+		t.Errorf("selected sonnet should be declared; got: %s", providersJSON)
+	}
+	// The brand-new provider falls back to its catalog instead of nothing.
+	if !strings.Contains(providersJSON, "gpt-5") {
+		t.Errorf("newly added provider should declare its catalog; got: %s", providersJSON)
 	}
 }

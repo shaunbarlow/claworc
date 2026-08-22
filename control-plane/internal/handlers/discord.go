@@ -249,12 +249,15 @@ func renderInitialDiscordEnv(inst database.Instance) string {
 
 // applyDiscordConfig writes the channels.discord block into the agent's
 // OpenClaw config over an established SSH connection and restarts the gateway
-// so it takes effect. The path is cleared first because `config set`
-// deep-merges map values — guilds/channels removed in Claworc would otherwise
-// linger.
+// so it takes effect.
+//
+// One atomic write, same as applySlackConfig. `config set` replaces this path
+// wholesale, so guilds/channels removed in Claworc disappear on their own;
+// clearing the path first only adds a write that OpenClaw's size-drop guard
+// rejects, and that strands the agent with no Discord config whenever it does
+// land and the follow-up set fails.
 func applyDiscordConfig(ctx context.Context, agent sshproxy.Instance, name, channelsJSON string) {
-	_, _, _, _ = agent.ExecOpenclaw(ctx, "config", "unset", "channels.discord")
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "channels.discord", channelsJSON, "--json")
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "channels.discord", channelsJSON, "--replace", "--json")
 	if err != nil {
 		log.Printf("Error setting channels.discord for %s: %v", utils.SanitizeForLog(name), err)
 		return

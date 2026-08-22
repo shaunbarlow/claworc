@@ -210,11 +210,18 @@ func renderInitialSlackEnv(inst database.Instance) string {
 
 // applySlackConfig writes the channels.slack block into the agent's OpenClaw
 // config over an established SSH connection and restarts the gateway so it
-// takes effect. The path is cleared first because `config set` deep-merges
-// map values — channels removed in Claworc would otherwise linger.
+// takes effect.
+//
+// One atomic write. `config set` replaces this path wholesale, so channels
+// removed in Claworc disappear without clearing the path first — and clearing
+// it first is actively harmful: `config unset channels.slack` is a separate
+// write that OpenClaw's size-drop guard rejects on a realistic config
+// ("Config write rejected … (size-drop:…)"), and on a config large enough for
+// it to land, a failing set would leave the agent with no Slack config at all.
+// `--replace` is explicit about the intent and keeps the write from being
+// refused should OpenClaw ever treat this as a protected map path.
 func applySlackConfig(ctx context.Context, agent sshproxy.Instance, name, channelsJSON string) {
-	_, _, _, _ = agent.ExecOpenclaw(ctx, "config", "unset", "channels.slack")
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "channels.slack", channelsJSON, "--json")
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "channels.slack", channelsJSON, "--replace", "--json")
 	if err != nil {
 		log.Printf("Error setting channels.slack for %s: %v", utils.SanitizeForLog(name), err)
 		return

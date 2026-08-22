@@ -309,6 +309,18 @@ func buildOpenClawProvidersJSON(models []string, gatewayProviders map[string]Gat
 					gpModels = append(gpModels, m)
 				}
 			}
+			// A provider declared with an empty model list is useless to
+			// OpenClaw -- it can't route a single call through it -- and the
+			// config shrink that comes with it trips OpenClaw's size-drop
+			// write guard, which rejects the whole models.providers write and
+			// leaves the agent with `"models": {}`. That is the normal state
+			// for a provider nobody has picked models for yet (one that was
+			// just added), so declare its full catalog instead of nothing.
+			// Restricting which models an agent may actually use is the job of
+			// the agents.defaults.models allowlist, not of this declaration.
+			if len(gpModels) == 0 {
+				gpModels = allModels
+			}
 		} else if len(gp.Models) > 0 {
 			gpModels = gp.Models
 		}
@@ -2740,7 +2752,7 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 			log.Printf("Error marshaling model config for %s: %v", utils.SanitizeForLog(name), err)
 			return
 		}
-		_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.model", string(modelJSON), "--json")
+		_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.model", string(modelJSON), "--replace", "--json")
 		if err != nil {
 			log.Printf("Error setting model config for %s: %v", utils.SanitizeForLog(name), err)
 			return
@@ -2759,11 +2771,15 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 		if err != nil {
 			log.Printf("Error marshaling models allowlist for %s: %v", utils.SanitizeForLog(name), err)
 		} else {
-			// `openclaw config set` deep-merges into existing map values, so a
-			// previously-selected model that the admin de-selected would linger.
-			// Clear the path before writing the new allowlist.
-			_, _, _, _ = inst.ExecOpenclaw(ctx, "config", "unset", "agents.defaults.models")
-			_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.models", string(modelsMapJSON), "--json")
+			// A previously-selected model that the admin de-selected has to
+			// disappear, so this is a replace, not a merge. `--replace` is
+			// required for it: agents.defaults.models is a protected map path,
+			// and without the flag OpenClaw refuses any write that would drop
+			// existing entries. Do NOT `unset` first -- removing the path is a
+			// separate write that OpenClaw's size-drop guard rejects outright
+			// on any non-trivial config, and if the follow-up set then fails
+			// the agent is left with no allowlist at all.
+			_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.models", string(modelsMapJSON), "--replace", "--json")
 			if err != nil {
 				log.Printf("Error setting models allowlist for %s: %v", utils.SanitizeForLog(name), err)
 			} else if code != 0 {
@@ -2778,10 +2794,15 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 		if err != nil {
 			log.Printf("Error marshaling gateway providers for %s: %v", utils.SanitizeForLog(name), err)
 		} else if providersJSON != "" {
-			// Clear the providers map first so de-selected providers are removed
-			// instead of being deep-merged with the previous config.
-			_, _, _, _ = inst.ExecOpenclaw(ctx, "config", "unset", "models.providers")
-			stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "models.providers", providersJSON, "--json")
+			// One atomic replace. models.providers is a protected map path, so
+			// `--replace` is what lets a de-selected provider be dropped;
+			// without it OpenClaw refuses the write ("Refusing to replace
+			// models.providers; it would remove existing entries"). Unsetting
+			// the path first is worse than useless: that write is itself
+			// rejected by OpenClaw's size-drop guard on a realistic config,
+			// and when it does land, a failing set leaves `"models": {}`
+			// behind -- an agent with no providers at all.
+			stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "models.providers", providersJSON, "--replace", "--json")
 			if err != nil {
 				log.Printf("Error setting gateway providers for %s: %v", utils.SanitizeForLog(name), err)
 			} else if code != 0 {

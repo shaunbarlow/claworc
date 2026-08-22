@@ -50,14 +50,15 @@ and delivered two ways:
 
 1. **At boot** — `buildCreateParams` (and the create path) sets the reserved
    `OPENCLAW_INITIAL_SLACK` env var; the agent image's `svc-openclaw/run`
-   script applies it with `openclaw config unset channels.slack` followed by
-   `openclaw config set channels.slack … --json` before the gateway starts.
+   script applies it with a single
+   `openclaw config set channels.slack … --replace --json` before the gateway
+   starts.
    Every container (re)start therefore reconciles the agent's Slack config
    from the DB. When the env var is absent (Slack never configured through
    Claworc), the script leaves `channels.slack` alone, so manual edits via the
    Config tab keep working.
 2. **On edit while running** — `PUT /api/v1/instances/{id}/slack` pushes the
-   same unset+set sequence over SSH and restarts the gateway
+   same single replacing set over SSH and restarts the gateway
    (`applySlackConfig` in `internal/handlers/slack.go`), so channel/DM changes
    apply without a container restart. A *token* change instead triggers the
    standard env-vars container restart, which re-applies everything via (1).
@@ -65,10 +66,16 @@ and delivered two ways:
    `EnsureEnvPropagated`, which compares the live container's environment
    against what the database says it should be. See `docs/env-propagation.md`.
 
-The unset-before-set is required because `openclaw config set` deep-merges map
-values — without it, channels removed in Claworc would linger. Consequence:
-once Slack is managed through Claworc, Claworc owns the whole `channels.slack`
-path and will overwrite manual edits under it.
+A plain `config set` already replaces `channels.slack` wholesale, so channels
+removed in Claworc are dropped; `--replace` is passed for consistency with the
+other Claworc-owned paths (`models.providers` *is* a protected map path, where
+the flag is required) and so this write can't start being refused if OpenClaw
+protects more paths later. Do **not** `config unset` the path first — that is a
+second write, OpenClaw's size-drop guard rejects it on any realistic config,
+and on a config large enough for it to land a failing set would leave the agent
+with no Slack config at all. Consequence: once Slack is managed through
+Claworc, Claworc owns the whole `channels.slack` path and will overwrite manual
+edits under it.
 
 ### API
 

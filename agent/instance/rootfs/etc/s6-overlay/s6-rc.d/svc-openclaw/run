@@ -31,29 +31,39 @@ fi
 # Apply initial model and provider config passed by Claworc at container creation.
 # This ensures the gateway starts with providers already configured, preventing
 # auth failures on messages that arrive before ConfigureInstance runs via SSH.
+#
+# Every one of these writes is a single `config set … --replace`. Claworc owns
+# these paths outright, so a value removed on the Claworc side has to disappear
+# here. `config set` already replaces most paths; models.providers is a
+# protected map path where it does not — without --replace OpenClaw refuses any
+# write that would drop an existing entry ("Refusing to replace
+# models.providers; it would remove existing entries"). The flag is passed
+# uniformly so every Claworc-owned path behaves the same and none of them can
+# be refused if OpenClaw protects more paths later.
+#
+# Never `config unset` first — that is a separate write, OpenClaw's size-drop
+# guard rejects it on a realistic config, and when it does land ahead of a
+# failing set the agent boots with the path gone entirely.
 if [ -n "$OPENCLAW_INITIAL_MODELS" ]; then
-    s6-setuidgid claworc openclaw config set agents.defaults.model "$OPENCLAW_INITIAL_MODELS" --json
+    s6-setuidgid claworc openclaw config set agents.defaults.model "$OPENCLAW_INITIAL_MODELS" --replace --json
 fi
 if [ -n "$OPENCLAW_INITIAL_PROVIDERS" ]; then
-    s6-setuidgid claworc openclaw config set models.providers "$OPENCLAW_INITIAL_PROVIDERS" --json
+    s6-setuidgid claworc openclaw config set models.providers "$OPENCLAW_INITIAL_PROVIDERS" --replace --json
 fi
 
 # Apply the Claworc-managed Slack channel config. When set it is authoritative
-# for channels.slack: clear the path first so channels removed in Claworc don't
-# linger (`config set` deep-merges map values). Tokens are never in this blob —
-# OpenClaw reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN from the environment. When the
-# env var is absent (Slack never configured via Claworc), any manually edited
-# channels.slack block is left untouched.
+# for channels.slack, so channels removed in Claworc are dropped by the replace.
+# Tokens are never in this blob — OpenClaw reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN
+# from the environment. When the env var is absent (Slack never configured via
+# Claworc), any manually edited channels.slack block is left untouched.
 if [ -n "$OPENCLAW_INITIAL_SLACK" ]; then
-    s6-setuidgid claworc openclaw config unset channels.slack || true
-    s6-setuidgid claworc openclaw config set channels.slack "$OPENCLAW_INITIAL_SLACK" --json
+    s6-setuidgid claworc openclaw config set channels.slack "$OPENCLAW_INITIAL_SLACK" --replace --json
 fi
 
 # Same contract for the Claworc-managed Discord config (token comes from the
 # DISCORD_BOT_TOKEN env var, never from this blob).
 if [ -n "$OPENCLAW_INITIAL_DISCORD" ]; then
-    s6-setuidgid claworc openclaw config unset channels.discord || true
-    s6-setuidgid claworc openclaw config set channels.discord "$OPENCLAW_INITIAL_DISCORD" --json
+    s6-setuidgid claworc openclaw config set channels.discord "$OPENCLAW_INITIAL_DISCORD" --replace --json
 fi
 
 echo "Starting OpenClaw Gateway (foreground) as claworc..."

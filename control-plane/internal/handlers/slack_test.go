@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -215,5 +217,41 @@ func TestValidateSlackConfigDMAllowlist(t *testing.T) {
 	}
 	if len(kept.DMAllowFrom) != 1 {
 		t.Errorf("allowlist should be preserved under other policies, got %v", kept.DMAllowFrom)
+	}
+}
+
+// TestApplySlackConfig_Argv pins the write shape for channels.slack: a single atomic
+// `config set … --replace`, never `config unset` followed by a set. Unsetting
+// is a separate write that OpenClaw's size-drop guard rejects on a realistic
+// config, and on a config large enough for it to land, a failing set would
+// leave the agent with no Slack config at all.
+func TestApplySlackConfig_Argv(t *testing.T) {
+	mock := &mockInstance{}
+	applySlackConfig(context.Background(), mock, "bot-x", `{"enabled":true}`)
+
+	if len(mock.calls) != 2 {
+		t.Fatalf("calls = %d (%v), want set + gateway stop", len(mock.calls), mock.calls)
+	}
+	for _, c := range mock.calls {
+		if len(c) > 1 && c[1] == "unset" {
+			t.Errorf("config unset must not be used; got %v", c)
+		}
+	}
+	want := []string{"config", "set", "channels.slack", `{"enabled":true}`, "--replace", "--json"}
+	if !reflect.DeepEqual(mock.calls[0], want) {
+		t.Errorf("call[0] = %v, want %v", mock.calls[0], want)
+	}
+	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop"}) {
+		t.Errorf("call[1] = %v, want gateway restart", mock.calls[1])
+	}
+}
+
+// TestApplySlackConfig_SetFailureSkipsRestart: a rejected write must not be
+// followed by a gateway restart, and must leave the previous config in place.
+func TestApplySlackConfig_SetFailureSkipsRestart(t *testing.T) {
+	mock := &mockInstance{results: []callResult{{code: 1, stderr: "invalid value"}}}
+	applySlackConfig(context.Background(), mock, "bot-x", `{"enabled":true}`)
+	if len(mock.calls) != 1 {
+		t.Fatalf("calls = %v, want only the failed set", mock.calls)
 	}
 }

@@ -181,8 +181,8 @@ func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
 // shared-folder index paths, and the Advanced overlay.
 //
 // Claworc owns the memory.* subtree once this feature is in use: pushes
-// replace it wholesale (config unset + set) so removed folders and cleared
-// overrides actually disappear despite `openclaw config set`'s deep-merge.
+// replace it wholesale (one `config set … --replace`, see applyMemoryConfig)
+// so removed folders and cleared overrides actually disappear.
 func buildMemoryConfig(inst *database.Instance) map[string]interface{} {
 	backend := effectiveMemoryBackend(inst)
 	cfg := map[string]interface{}{"backend": backend}
@@ -239,8 +239,15 @@ func buildMemoryConfig(inst *database.Instance) map[string]interface{} {
 
 // applyMemoryConfig replaces the memory subtree in the agent's OpenClaw
 // config over an established SSH connection and restarts the gateway
-// (memory.* is not hot-reloaded by OpenClaw). `config unset` first because
-// `config set` deep-merges maps, which would leave removed keys behind.
+// (memory.* is not hot-reloaded by OpenClaw).
+//
+// One atomic write, same as applySlackConfig/applyDiscordConfig. `config set`
+// replaces this subtree wholesale, so removed folders and cleared overrides
+// disappear without an `unset` first — and unsetting is the worse option: it
+// is a separate write that OpenClaw's size-drop guard rejects on a realistic
+// config, and when it does land ahead of a failing set the agent loses its
+// memory config entirely.
+//
 // Best-effort: failures are logged; the config is re-pushed on the next
 // memory-affecting change.
 func applyMemoryConfig(ctx context.Context, agent sshproxy.Instance, name string, cfg map[string]interface{}) {
@@ -249,12 +256,7 @@ func applyMemoryConfig(ctx context.Context, agent sshproxy.Instance, name string
 		log.Printf("memory-config: marshal for %s: %v", utils.SanitizeForLog(name), err)
 		return
 	}
-	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "unset", "memory"); err != nil || code != 0 {
-		// A missing key is fine; anything else is still only log-worthy.
-		log.Printf("memory-config: unset memory for %s (code %d): %v %s",
-			utils.SanitizeForLog(name), code, err, utils.SanitizeForLog(stderr))
-	}
-	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "memory", string(payload), "--json"); err != nil {
+	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "memory", string(payload), "--replace", "--json"); err != nil {
 		log.Printf("memory-config: set memory for %s: %v", utils.SanitizeForLog(name), err)
 		return
 	} else if code != 0 {

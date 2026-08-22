@@ -42,9 +42,11 @@ PVC, never inside the folder.
 ## Config propagation
 
 `buildMemoryConfig` resolves the full `memory` subtree; `applyMemoryConfig`
-replaces it wholesale (`openclaw config unset memory` + `config set memory
-<json> --json` — set alone deep-merges, which would leave removed keys
-behind) and restarts the gateway (`openclaw gateway stop`; memory.* is not
+replaces it wholesale in one write (`openclaw config set memory <json>
+--replace --json`, so removed folders and cleared overrides disappear; never
+`config unset` first — that write is rejected by OpenClaw's size-drop guard,
+and when it does land ahead of a failing set the agent loses its memory config
+entirely) and restarts the gateway (`openclaw gateway stop`; memory.* is not
 hot-reloaded by OpenClaw). **Claworc owns the `memory.*` subtree** — manual
 edits to it via the raw Config tab are overwritten on the next push.
 

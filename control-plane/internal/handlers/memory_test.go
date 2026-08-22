@@ -153,36 +153,43 @@ func TestApplyMemoryConfig_ArgvAndRestart(t *testing.T) {
 	cfg := map[string]interface{}{"backend": "qmd", "qmd": map[string]interface{}{"searchMode": "search"}}
 	applyMemoryConfig(context.Background(), mock, "bot-x", cfg)
 
-	if len(mock.calls) != 3 {
-		t.Fatalf("calls = %d (%v), want unset + set + gateway stop", len(mock.calls), mock.calls)
+	// One atomic set, no `config unset` — see applyMemoryConfig: unsetting is a
+	// separate write OpenClaw's size-drop guard rejects, and when it does land
+	// ahead of a failing set the agent loses its memory config entirely.
+	if len(mock.calls) != 2 {
+		t.Fatalf("calls = %d (%v), want set + gateway stop", len(mock.calls), mock.calls)
 	}
-	if !reflect.DeepEqual(mock.calls[0], []string{"config", "unset", "memory"}) {
-		t.Errorf("call[0] = %v", mock.calls[0])
+	for _, c := range mock.calls {
+		if len(c) > 1 && c[1] == "unset" {
+			t.Errorf("config unset must not be used; got %v", c)
+		}
 	}
-	if len(mock.calls[1]) != 5 || mock.calls[1][0] != "config" || mock.calls[1][1] != "set" ||
-		mock.calls[1][2] != "memory" || mock.calls[1][4] != "--json" {
-		t.Fatalf("call[1] = %v", mock.calls[1])
+	if len(mock.calls[0]) != 6 || mock.calls[0][0] != "config" || mock.calls[0][1] != "set" ||
+		mock.calls[0][2] != "memory" || mock.calls[0][4] != "--replace" || mock.calls[0][5] != "--json" {
+		t.Fatalf("call[0] = %v", mock.calls[0])
 	}
 	var pushed map[string]interface{}
-	if err := json.Unmarshal([]byte(mock.calls[1][3]), &pushed); err != nil {
+	if err := json.Unmarshal([]byte(mock.calls[0][3]), &pushed); err != nil {
 		t.Fatalf("payload not JSON: %v", err)
 	}
 	if pushed["backend"] != "qmd" {
 		t.Errorf("payload = %v", pushed)
 	}
-	if !reflect.DeepEqual(mock.calls[2], []string{"gateway", "stop"}) {
-		t.Errorf("call[2] = %v, want gateway restart", mock.calls[2])
+	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop"}) {
+		t.Errorf("call[1] = %v, want gateway restart", mock.calls[1])
 	}
 }
 
 func TestApplyMemoryConfig_SetFailureSkipsRestart(t *testing.T) {
 	mock := &mockInstance{results: []callResult{
-		{code: 0},                          // unset ok
-		{code: 1, stderr: "invalid value"}, // set fails
+		{code: 1, stderr: "invalid value"}, // the set fails
 	}}
 	applyMemoryConfig(context.Background(), mock, "bot-x", map[string]interface{}{"backend": "builtin"})
-	if len(mock.calls) != 2 {
-		t.Fatalf("calls = %v, want no gateway restart after failed set", mock.calls)
+	if len(mock.calls) != 1 {
+		t.Fatalf("calls = %v, want only the failed set and no gateway restart", mock.calls)
+	}
+	if mock.calls[0][1] != "set" {
+		t.Errorf("call[0] = %v, want the config set", mock.calls[0])
 	}
 }
 
