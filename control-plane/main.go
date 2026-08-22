@@ -514,6 +514,10 @@ func main() {
 				r.Post("/settings/rotate-ssh-key", handlers.RotateSSHKey)
 				r.Get("/audit-logs", handlers.GetAuditLogs)
 
+				// Control plane self-update: pull the latest image and restart
+				// the control-plane's own container/pod in place.
+				r.Post("/control-plane/self-update", handlers.SelfUpdateControlPlane)
+
 				// Container backend (Docker/Kubernetes) diagnostics + recovery
 				r.Get("/orchestrator/status", handlers.GetOrchestratorStatus)
 				r.Post("/orchestrator/reinitialize", handlers.ReinitializeOrchestrator)

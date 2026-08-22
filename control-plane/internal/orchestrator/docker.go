@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
@@ -386,6 +387,180 @@ func (d *DockerOrchestrator) UpdateImage(ctx context.Context, name string, param
 
 	// Recreate the container with the same config but fresh image
 	return d.createContainer(ctx, params)
+}
+
+// SelfUpdate pulls a fresh image for the control-plane's own container and
+// hands off the stop/remove/recreate to a short-lived detached "updater"
+// helper container launched via the same docker.sock the control-plane
+// already has mounted (see docker-compose.yml / install.sh).
+//
+// Why a helper container instead of doing it in-process: the control-plane
+// cannot safely ContainerStop+ContainerRemove its own container from inside
+// itself. Stopping its own container delivers SIGTERM to its own PID 1 and
+// tears down the very process that would otherwise go on to remove and
+// recreate it - there is no way to guarantee the recreate step still runs
+// after the container (and this goroutine) is killed. Delegating the swap
+// to a separate, disposable container run from outside removes that race:
+// the helper only depends on the Docker daemon, not on the control-plane
+// process staying alive.
+//
+// The helper is given the exact `docker run` arguments needed to recreate
+// the control-plane container (same name, image, ports, mounts, env,
+// restart policy) read back from the *live* container's own inspect data,
+// so no separate "how was I configured" bookkeeping is needed - whatever is
+// actually running is what gets reproduced, just on the new image.
+//
+// image, when empty, means "same image reference as currently running";
+// SelfUpdate always force-pulls before recreating either way.
+func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
+	selfName := config.Cfg.SelfContainerName
+	if selfName == "" {
+		selfName = "claworc"
+	}
+
+	inspect, err := d.client.ContainerInspect(ctx, selfName)
+	if err != nil {
+		return fmt.Errorf("inspect self container %q: %w", selfName, err)
+	}
+
+	targetImage := img
+	if targetImage == "" {
+		targetImage = inspect.Config.Image
+	}
+
+	log.Printf("SelfUpdate: force-pulling image %s", targetImage)
+	reader, err := d.client.ImagePull(ctx, targetImage, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w", targetImage, err)
+	}
+	defer reader.Close()
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return fmt.Errorf("pull image %s: %w", targetImage, err)
+	}
+	log.Printf("SelfUpdate: image %s pulled successfully", targetImage)
+
+	// Build the exact docker-run invocation the helper will use to recreate
+	// us, mirroring the live container's own config/host config.
+	runArgs := selfUpdateRunArgs(selfName, targetImage, inspect)
+
+	helperName := selfName + "-updater"
+	// Best-effort: remove any stale helper from a previous failed attempt.
+	_ = d.client.ContainerRemove(ctx, helperName, container.RemoveOptions{Force: true})
+
+	// The helper script: wait for the current control-plane container to
+	// actually stop (it exits on its own shortly after this handler returns
+	// and the HTTP response is flushed, or the helper force-stops it after a
+	// grace period), remove it, run the replacement, then remove itself
+	// (AutoRemove below).
+	script := selfUpdateHelperScript(selfName, runArgs)
+
+	helperCfg := &container.Config{
+		Image: "docker:cli", // small official image bundling the docker CLI
+		Cmd:   []string{"sh", "-c", script},
+		Labels: map[string]string{
+			"managed-by": labelManagedBy,
+			"purpose":    "self-update-helper",
+		},
+	}
+	helperHostCfg := &container.HostConfig{
+		Binds:         []string{"/var/run/docker.sock:/var/run/docker.sock"},
+		AutoRemove:    true,
+		NetworkMode:   "none",
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
+	}
+
+	// Ensure the helper image is present; a fresh host may not have pulled it yet.
+	if _, _, err := d.client.ImageInspectWithRaw(ctx, "docker:cli"); err != nil {
+		log.Printf("SelfUpdate: pulling helper image docker:cli")
+		helperReader, perr := d.client.ImagePull(ctx, "docker:cli", image.PullOptions{})
+		if perr != nil {
+			return fmt.Errorf("pull helper image docker:cli: %w", perr)
+		}
+		io.Copy(io.Discard, helperReader)
+		helperReader.Close()
+	}
+
+	resp, err := d.client.ContainerCreate(ctx, helperCfg, helperHostCfg, nil, nil, helperName)
+	if err != nil {
+		return fmt.Errorf("create updater helper: %w", err)
+	}
+	if err := d.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("start updater helper: %w", err)
+	}
+
+	log.Printf("SelfUpdate: helper container %s launched; control-plane will restart shortly on image %s", helperName, targetImage)
+	return nil
+}
+
+// selfUpdateRunArgs reconstructs the `docker run` argument list needed to
+// recreate the control-plane container from its own live inspect data:
+// same name, image, published ports, binds/mounts, env, network, and
+// restart policy.
+func selfUpdateRunArgs(name, img string, inspect types.ContainerJSON) []string {
+	args := []string{"run", "-d", "--name", name, "--restart", "unless-stopped"}
+
+	if inspect.HostConfig != nil {
+		for _, b := range inspect.HostConfig.Binds {
+			args = append(args, "-v", b)
+		}
+		for containerPort, bindings := range inspect.HostConfig.PortBindings {
+			for _, b := range bindings {
+				hostPort := b.HostPort
+				if hostPort == "" {
+					continue
+				}
+				spec := fmt.Sprintf("%s:%s", hostPort, containerPort.Port())
+				if b.HostIP != "" {
+					spec = fmt.Sprintf("%s:%s:%s", b.HostIP, hostPort, containerPort.Port())
+				}
+				args = append(args, "-p", spec)
+			}
+		}
+	}
+	if inspect.NetworkSettings != nil {
+		for netName := range inspect.NetworkSettings.Networks {
+			args = append(args, "--network", netName)
+			break // docker run only accepts one network at creation time; this backend always attaches exactly one
+		}
+	}
+	if inspect.Config != nil {
+		for _, e := range inspect.Config.Env {
+			args = append(args, "-e", e)
+		}
+	}
+	args = append(args, img)
+	return args
+}
+
+// selfUpdateHelperScript is the shell script run inside the disposable
+// docker:cli helper container. It waits for the named container to stop
+// (the control-plane exits on its own shortly after SelfUpdate returns and
+// the HTTP response is flushed - see handlers.SelfUpdateControlPlane), then
+// removes it and recreates it via the given docker-run args. A bounded wait
+// with a fallback force-stop guards against the caller/process not exiting
+// promptly for any reason.
+func selfUpdateHelperScript(name string, runArgs []string) string {
+	quoted := make([]string, len(runArgs))
+	for i, a := range runArgs {
+		quoted[i] = shellQuote(a)
+	}
+	return fmt.Sprintf(`set -e
+NAME=%s
+for i in $(seq 1 30); do
+  STATUS=$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null || echo "gone")
+  if [ "$STATUS" != "true" ]; then break; fi
+  sleep 1
+done
+docker stop "$NAME" >/dev/null 2>&1 || true
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+docker %s
+`, shellQuote(name), strings.Join(quoted, " "))
+}
+
+// shellQuote wraps s in single quotes for safe inclusion in the sh -c
+// script above, escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // createContainer builds and starts a container from CreateParams (without pulling or creating volumes).

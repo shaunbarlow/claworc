@@ -8,8 +8,8 @@ import (
 )
 
 type Settings struct {
-	DataPath     string   `envconfig:"DATA_PATH" default:"/app/data"`
-	BackupsPath  string   `envconfig:"BACKUPS_PATH" default:""`
+	DataPath    string `envconfig:"DATA_PATH" default:"/app/data"`
+	BackupsPath string `envconfig:"BACKUPS_PATH" default:""`
 	// Database is a URL-style connection string covering driver, credentials,
 	// host, and database name. Empty means "use SQLite at DataPath" (default
 	// behavior, fully backwards compatible). See docs/databases.md.
@@ -47,6 +47,15 @@ type Settings struct {
 	// on every frame received, so an actively-streaming agent is never cut off;
 	// only a genuine stall trips it.
 	WebhookIdleTimeout time.Duration `envconfig:"WEBHOOK_IDLE_TIMEOUT" default:"120s"`
+
+	// SelfContainerName is the Docker container name of the control-plane's
+	// own container. Only used by the Docker backend's SelfUpdate: it needs
+	// its own container name/ID to tell the detached helper container what to
+	// stop/remove/recreate. Defaults to "claworc", matching install.sh and
+	// docker-compose.yml's --name/container_name. Override with
+	// CLAWORC_SELF_CONTAINER_NAME if the control-plane container is deployed
+	// under a different name.
+	SelfContainerName string `envconfig:"SELF_CONTAINER_NAME" default:"claworc"`
 }
 
 var Cfg Settings

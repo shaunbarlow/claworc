@@ -34,3 +34,18 @@ export async function rotateSSHKey(): Promise<any> {
   const { data } = await client.post("/settings/rotate-ssh-key");
   return data;
 }
+
+export interface SelfUpdateResponse {
+  status: string;
+  task_id?: string;
+  detail?: string;
+}
+
+// selfUpdateControlPlane triggers a pull-and-restart of the control plane's
+// own container/pod. The request returns as soon as the update has been
+// initiated -- the dashboard itself is about to go down and come back up, so
+// callers should not expect (or wait for) a meaningful follow-up response.
+export async function selfUpdateControlPlane(): Promise<SelfUpdateResponse> {
+  const { data } = await client.post<SelfUpdateResponse>("/control-plane/self-update");
+  return data;
+}

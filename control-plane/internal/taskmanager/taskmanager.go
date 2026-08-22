@@ -28,6 +28,10 @@ const (
 	// Browser-pod lifecycle tasks (on-demand browser feature).
 	TaskBrowserSpawn   TaskType = "browser.spawn"
 	TaskBrowserMigrate TaskType = "browser.migrate"
+	// TaskControlPlaneSelfUpdate tracks the control-plane's own image update
+	// (see handlers.SelfUpdateControlPlane). System task -- not tied to any
+	// instance, admin-only visibility.
+	TaskControlPlaneSelfUpdate TaskType = "controlplane.self_update"
 )
 
 // State is the lifecycle position of a task.

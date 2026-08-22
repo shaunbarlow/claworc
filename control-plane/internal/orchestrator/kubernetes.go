@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -725,6 +727,81 @@ func (k *KubernetesOrchestrator) ExecInInstance(ctx context.Context, name string
 		return "", "", -1, fmt.Errorf("no running pod found for instance %s", name)
 	}
 	return k.execInPod(ctx, podName, cmd)
+}
+
+// selfDeploymentLabelKeys are the labels the control-plane's own pod always
+// carries (see helm/templates/_helpers.tpl claworc.selectorLabels), used to
+// find its owning Deployment without needing extra RBAC to walk the
+// Pod -> ReplicaSet -> Deployment owner-reference chain.
+var selfDeploymentLabelKeys = []string{"app.kubernetes.io/name", "app.kubernetes.io/instance"}
+
+// SelfUpdate patches the control-plane's own Deployment to roll out a new
+// image. Unlike the Docker backend, there is no self-stop/self-remove race
+// to work around here: the Deployment controller (not this pod) drives the
+// rollout, so this pod can safely trigger it and then simply get terminated
+// by Kubernetes once the new ReplicaSet's pod is ready (Recreate strategy —
+// see helm/templates/deployment.yaml — takes the old pod down first).
+//
+// image, when empty, means "same image reference, re-pull" — the container
+// image field is left as the deployment's live value, but a rollout is still
+// forced via a restart annotation (matching `kubectl rollout restart`
+// semantics), so imagePullPolicy: Always re-pulls even an unchanged tag.
+func (k *KubernetesOrchestrator) SelfUpdate(ctx context.Context, img string) error {
+	ns := k.ns()
+
+	selfPodName := os.Getenv("HOSTNAME")
+	if selfPodName == "" {
+		return fmt.Errorf("cannot determine own pod name (HOSTNAME env var unset)")
+	}
+	selfPod, err := k.clientset.CoreV1().Pods(ns).Get(ctx, selfPodName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get own pod %s: %w", selfPodName, err)
+	}
+
+	selector := ""
+	for _, key := range selfDeploymentLabelKeys {
+		if v, ok := selfPod.Labels[key]; ok && v != "" {
+			if selector != "" {
+				selector += ","
+			}
+			selector += fmt.Sprintf("%s=%s", key, v)
+		}
+	}
+	if selector == "" {
+		return fmt.Errorf("own pod %s has no identifying labels; cannot locate control-plane deployment", selfPodName)
+	}
+
+	deployments, err := k.clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return fmt.Errorf("list deployments matching %s: %w", selector, err)
+	}
+	if len(deployments.Items) != 1 {
+		return fmt.Errorf("expected exactly one control-plane deployment matching %s, found %d", selector, len(deployments.Items))
+	}
+	dep := deployments.Items[0]
+
+	if len(dep.Spec.Template.Spec.Containers) == 0 {
+		return fmt.Errorf("control-plane deployment %s has no containers", dep.Name)
+	}
+	containerName := dep.Spec.Template.Spec.Containers[0].Name
+	targetImage := img
+	if targetImage == "" {
+		targetImage = dep.Spec.Template.Spec.Containers[0].Image
+	}
+
+	patch := fmt.Sprintf(
+		`{"spec":{"template":{"metadata":{"annotations":{"claworc.io/self-update-at":%q}},"spec":{"containers":[{"name":%q,"image":%q}]}}}}`,
+		time.Now().UTC().Format(time.RFC3339Nano), containerName, targetImage,
+	)
+	_, err = k.clientset.AppsV1().Deployments(ns).Patch(
+		ctx, dep.Name, apitypes.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{},
+	)
+	if err != nil {
+		return fmt.Errorf("patch deployment %s: %w", dep.Name, err)
+	}
+
+	log.Printf("SelfUpdate: patched deployment %s to image %s; rollout in progress", dep.Name, targetImage)
+	return nil
 }
 
 // --- Helpers ---

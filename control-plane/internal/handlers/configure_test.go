@@ -80,10 +80,10 @@ func (mockOps) StreamExecInInstance(_ context.Context, _ string, _ []string, _ i
 func (mockOps) UpdatePlacementConfig(_ context.Context, _ string, _ orchestrator.UpdatePlacementParams) error {
 	return nil
 }
-func (mockOps) DeleteSharedVolume(_ context.Context, _ uint) error               { return nil }
-func (mockOps) CloneVolume(_ context.Context, _, _ string) error                 { return nil }
-func (mockOps) VolumeNameFor(name, suffix string) string                         { return name + "-" + suffix }
-func (mockOps) Apply(_ context.Context, _ orchestrator.WorkloadSpec) error       { return nil }
+func (mockOps) DeleteSharedVolume(_ context.Context, _ uint) error         { return nil }
+func (mockOps) CloneVolume(_ context.Context, _, _ string) error           { return nil }
+func (mockOps) VolumeNameFor(name, suffix string) string                   { return name + "-" + suffix }
+func (mockOps) Apply(_ context.Context, _ orchestrator.WorkloadSpec) error { return nil }
 func (mockOps) DeleteWorkload(_ context.Context, _ orchestrator.WorkloadSpec) error {
 	return nil
 }
@@ -91,6 +91,7 @@ func (mockOps) EnsureSSHAccess(_ context.Context, _, _ string) error { return ni
 func (mockOps) WorkloadSSHAddress(_ context.Context, _ string) (string, int, error) {
 	return "", 0, nil
 }
+func (mockOps) SelfUpdate(_ context.Context, _ string) error { return nil }
 
 func TestConfigureInstance_NoOp(t *testing.T) {
 	inst := &mockInstance{}

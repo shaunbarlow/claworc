@@ -41,6 +41,17 @@ type ContainerOrchestrator interface {
 	// Image
 	UpdateImage(ctx context.Context, name string, params CreateParams) error
 
+	// SelfUpdate pulls the given image tag/reference for the control-plane's
+	// own workload and triggers a self-replacement (Docker: hands off to a
+	// detached helper container that swaps the running container out from
+	// under itself; Kubernetes: patches the control-plane's own Deployment to
+	// roll to the new image). image may be empty to mean "same reference,
+	// re-pull latest" (imagePullPolicy: Always / --pull=always semantics).
+	// Returns once the update has been *initiated* -- the control-plane process
+	// serving this call is expected to exit shortly after, so callers must not
+	// wait on a response confirming completion.
+	SelfUpdate(ctx context.Context, image string) error
+
 	// Clone
 	CloneVolumes(ctx context.Context, srcName, dstName string) error
 	// CloneVolume copies a single named volume (PVC on K8s, named volume on

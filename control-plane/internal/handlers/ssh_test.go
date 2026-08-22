@@ -222,8 +222,8 @@ func (m *mockOrchestrator) UpdatePlacementConfig(_ context.Context, _ string, _ 
 	return nil
 }
 func (m *mockOrchestrator) DeleteSharedVolume(_ context.Context, _ uint) error { return nil }
-func (m *mockOrchestrator) CloneVolume(_ context.Context, _, _ string) error    { return nil }
-func (m *mockOrchestrator) VolumeNameFor(name, suffix string) string            { return name + "-" + suffix }
+func (m *mockOrchestrator) CloneVolume(_ context.Context, _, _ string) error   { return nil }
+func (m *mockOrchestrator) VolumeNameFor(name, suffix string) string           { return name + "-" + suffix }
 func (m *mockOrchestrator) Apply(_ context.Context, _ orchestrator.WorkloadSpec) error {
 	return nil
 }
@@ -234,6 +234,7 @@ func (m *mockOrchestrator) EnsureSSHAccess(_ context.Context, _, _ string) error
 func (m *mockOrchestrator) WorkloadSSHAddress(_ context.Context, _ string) (string, int, error) {
 	return "", 0, nil
 }
+func (m *mockOrchestrator) SelfUpdate(_ context.Context, _ string) error { return nil }
 
 // --- test helpers ---
 

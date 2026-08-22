@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import ProviderIcon from "@common/components/ProviderIcon";
 import ProviderModal from "@common/components/ProviderModal";
+import ConfirmDialog from "@common/components/ConfirmDialog";
 import EnvVarsEditor from "@common/components/EnvVarsEditor";
 import SimpleKVEditor from "@common/components/SimpleKVEditor";
 import TolerationsEditor from "@common/components/TolerationsEditor";
@@ -23,7 +24,7 @@ import Page from "@common/components/Page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSettings, useUpdateSettings } from "@common/hooks/useSettings";
 import { useProviders, useCatalogIconMap } from "@common/hooks/useProviders";
-import { fetchSSHFingerprint, rotateSSHKey } from "@common/api/ssh";
+import { fetchSSHFingerprint, rotateSSHKey, selfUpdateControlPlane } from "@common/api/ssh";
 import { syncAllProviders } from "@common/api/llm";
 import { successToast, errorToast } from "@common/utils/toast";
 import { validateResourceQuantities } from "@common/utils/resourceValidation";
@@ -787,6 +788,17 @@ function MiscTab({
     onError: (err) => errorToast("Failed to rotate SSH key", err),
   });
 
+  const [selfUpdateConfirmOpen, setSelfUpdateConfirmOpen] = useState(false);
+  const selfUpdateMutation = useMutation({
+    mutationFn: selfUpdateControlPlane,
+    onSuccess: () => {
+      successToast(
+        "Update started — the dashboard will be briefly unreachable while it restarts.",
+      );
+    },
+    onError: (err) => errorToast("Failed to start control plane update", err),
+  });
+
   return (
     <div className="space-y-8 max-w-2xl">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -822,6 +834,40 @@ function MiscTab({
               </dd>
             </div>
           </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+            <RefreshCw size={14} />
+            Control Plane
+          </h3>
+          <button
+            onClick={() => setSelfUpdateConfirmOpen(true)}
+            disabled={selfUpdateMutation.isPending}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw size={12} className={selfUpdateMutation.isPending ? "animate-spin" : ""} />
+            {selfUpdateMutation.isPending ? "Updating..." : "Check for Updates"}
+          </button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Pulls the latest Claworc image and restarts the control plane in place. Running agent
+          instances are not affected. The dashboard will be briefly unreachable while it restarts
+          (usually under a minute).
+        </p>
+        {selfUpdateConfirmOpen && (
+          <ConfirmDialog
+            title="Update Claworc control plane?"
+            message="This pulls the latest image and restarts the control plane now. The dashboard will be briefly unreachable while it comes back up. Running agent instances keep running and are not affected."
+            confirmLabel="Update Now"
+            onCancel={() => setSelfUpdateConfirmOpen(false)}
+            onConfirm={() => {
+              setSelfUpdateConfirmOpen(false);
+              selfUpdateMutation.mutate();
+            }}
+          />
         )}
       </div>
 
