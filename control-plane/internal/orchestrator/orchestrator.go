@@ -42,15 +42,27 @@ type ContainerOrchestrator interface {
 	UpdateImage(ctx context.Context, name string, params CreateParams) error
 
 	// SelfUpdate pulls the given image tag/reference for the control-plane's
-	// own workload and triggers a self-replacement (Docker: hands off to a
-	// detached helper container that swaps the running container out from
-	// under itself; Kubernetes: patches the control-plane's own Deployment to
-	// roll to the new image). image may be empty to mean "same reference,
-	// re-pull latest" (imagePullPolicy: Always / --pull=always semantics).
-	// Returns once the update has been *initiated* -- the control-plane process
-	// serving this call is expected to exit shortly after, so callers must not
-	// wait on a response confirming completion.
-	SelfUpdate(ctx context.Context, image string) error
+	// own workload and, if it differs from what is currently running,
+	// triggers a self-replacement (Docker: hands off to a detached helper
+	// container that swaps the running container out from under itself;
+	// Kubernetes: patches the control-plane's own Deployment to roll to the
+	// new image). image may be empty to mean "same reference, re-pull latest"
+	// (imagePullPolicy: Always / --pull=always semantics).
+	//
+	// The returned bool reports whether a restart was actually triggered:
+	// false means the pulled image was already identical to what is running
+	// (by digest) and nothing was restarted. Both backends compare digests
+	// before acting -- see docker.go/kubernetes.go for how each resolves
+	// "what's currently running" vs "what's newly available". A false
+	// positive (skipping when an update actually is available) is far less
+	// disruptive than an unnecessary restart, so on any comparison failure
+	// (e.g. can't reach the registry) implementations fail open and proceed
+	// with the restart rather than silently doing nothing.
+	//
+	// Returns once the update has been *initiated* when triggered -- the
+	// control-plane process serving this call is expected to exit shortly
+	// after, so callers must not wait on a response confirming completion.
+	SelfUpdate(ctx context.Context, image string) (updated bool, err error)
 
 	// Clone
 	CloneVolumes(ctx context.Context, srcName, dstName string) error

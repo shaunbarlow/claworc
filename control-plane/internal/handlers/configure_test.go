@@ -91,7 +91,7 @@ func (mockOps) EnsureSSHAccess(_ context.Context, _, _ string) error { return ni
 func (mockOps) WorkloadSSHAddress(_ context.Context, _ string) (string, int, error) {
 	return "", 0, nil
 }
-func (mockOps) SelfUpdate(_ context.Context, _ string) error { return nil }
+func (mockOps) SelfUpdate(_ context.Context, _ string) (bool, error) { return false, nil }
 
 func TestConfigureInstance_NoOp(t *testing.T) {
 	inst := &mockInstance{}

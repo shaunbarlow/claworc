@@ -38,17 +38,22 @@ func SelfUpdateControlPlane(w http.ResponseWriter, r *http.Request) {
 	analytics.Track(r.Context(), analytics.EventControlPlaneSelfUpdate, nil)
 
 	taskID := ""
-	work := func(ctx context.Context) error {
+	// work returns (updated, err). updated is false when SelfUpdate determined
+	// the target image already matches what's running (by registry/local
+	// digest comparison -- see orchestrator.SelfUpdate) and skipped the
+	// restart entirely.
+	work := func(ctx context.Context) (bool, error) {
 		// Use a fresh background context for the actual orchestrator call:
 		// the HTTP request context (r.Context()) is canceled the moment this
 		// handler returns/the connection closes, but for Docker the pull +
 		// helper-container launch must complete regardless of whether the
 		// client is still around to see the response.
-		if err := orch.SelfUpdate(context.Background(), ""); err != nil {
+		updated, err := orch.SelfUpdate(context.Background(), "")
+		if err != nil {
 			log.Printf("Control-plane self-update failed: %v", err)
-			return err
+			return false, err
 		}
-		return nil
+		return updated, nil
 	}
 
 	if TaskMgr != nil {
@@ -58,13 +63,23 @@ func SelfUpdateControlPlane(w http.ResponseWriter, r *http.Request) {
 			ResourceName: "Control Plane",
 			Title:        "Updating Claworc control plane",
 			Run: func(ctx context.Context, h *taskmanager.Handle) error {
-				h.UpdateMessage("Pulling latest image...")
-				return work(ctx)
+				h.UpdateMessage("Checking for a newer image...")
+				updated, err := work(ctx)
+				if err != nil {
+					return err
+				}
+				if !updated {
+					// Terminal message shown on the toast once the task finishes;
+					// distinguishes "already up to date" from a real restart for
+					// whichever request/session is still around to see it.
+					h.UpdateMessage("Already running the latest image; no restart needed.")
+				}
+				return nil
 			},
 		})
 	} else {
 		go func() {
-			if err := work(context.Background()); err != nil {
+			if _, err := work(context.Background()); err != nil {
 				log.Printf("Control-plane self-update (no task manager) failed: %v", err)
 			}
 		}()
@@ -73,6 +88,6 @@ func SelfUpdateControlPlane(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "updating",
 		"task_id": taskID,
-		"detail":  fmt.Sprintf("Update initiated by user %d; the dashboard will be briefly unreachable while it restarts.", userID),
+		"detail":  fmt.Sprintf("Update check initiated by user %d. If a newer image is available the dashboard will be briefly unreachable while it restarts; otherwise nothing happens.", userID),
 	})
 }

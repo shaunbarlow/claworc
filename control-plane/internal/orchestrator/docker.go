@@ -410,9 +410,11 @@ func (d *DockerOrchestrator) UpdateImage(ctx context.Context, name string, param
 // so no separate "how was I configured" bookkeeping is needed - whatever is
 // actually running is what gets reproduced, just on the new image.
 //
-// image, when empty, means "same image reference as currently running";
-// SelfUpdate always force-pulls before recreating either way.
-func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
+// image, when empty, means "same image reference as currently running".
+// SelfUpdate always force-pulls to check for a newer digest, but only
+// triggers the restart when the pulled image actually differs from what
+// this container is running -- see the ID comparison below.
+func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) (bool, error) {
 	selfName := config.Cfg.SelfContainerName
 	if selfName == "" {
 		selfName = "claworc"
@@ -420,7 +422,7 @@ func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
 
 	inspect, err := d.client.ContainerInspect(ctx, selfName)
 	if err != nil {
-		return fmt.Errorf("inspect self container %q: %w", selfName, err)
+		return false, fmt.Errorf("inspect self container %q: %w", selfName, err)
 	}
 
 	targetImage := img
@@ -428,16 +430,35 @@ func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
 		targetImage = inspect.Config.Image
 	}
 
+	// runningImageID is the content-addressable ID of the image this
+	// container was actually created from (resolved once at creation time,
+	// not re-derived from the possibly-mutable tag on Config.Image).
+	runningImageID := inspect.Image
+
 	log.Printf("SelfUpdate: force-pulling image %s", targetImage)
 	reader, err := d.client.ImagePull(ctx, targetImage, image.PullOptions{})
 	if err != nil {
-		return fmt.Errorf("pull image %s: %w", targetImage, err)
+		return false, fmt.Errorf("pull image %s: %w", targetImage, err)
 	}
 	defer reader.Close()
 	if _, err := io.Copy(io.Discard, reader); err != nil {
-		return fmt.Errorf("pull image %s: %w", targetImage, err)
+		return false, fmt.Errorf("pull image %s: %w", targetImage, err)
 	}
 	log.Printf("SelfUpdate: image %s pulled successfully", targetImage)
+
+	// Compare the freshly-pulled image's ID against what's currently running.
+	// A match means the tag was re-pulled but nothing actually changed (the
+	// common "latest already is latest" case) -- skip the disruptive restart.
+	// Any failure resolving the pulled image's ID is treated as "can't tell",
+	// which fails open into restarting rather than silently doing nothing.
+	pulledInfo, inspectErr := d.client.ImageInspect(ctx, targetImage)
+	if inspectErr == nil && pulledInfo.ID != "" && pulledInfo.ID == runningImageID {
+		log.Printf("SelfUpdate: pulled image %s matches the running image (%s); no restart needed", targetImage, shortImageID(runningImageID))
+		return false, nil
+	}
+	if inspectErr != nil {
+		log.Printf("SelfUpdate: could not inspect pulled image %s to compare digests (%v); proceeding with restart", targetImage, inspectErr)
+	}
 
 	// Build the exact docker-run invocation the helper will use to recreate
 	// us, mirroring the live container's own config/host config.
@@ -474,7 +495,7 @@ func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
 		log.Printf("SelfUpdate: pulling helper image docker:cli")
 		helperReader, perr := d.client.ImagePull(ctx, "docker:cli", image.PullOptions{})
 		if perr != nil {
-			return fmt.Errorf("pull helper image docker:cli: %w", perr)
+			return false, fmt.Errorf("pull helper image docker:cli: %w", perr)
 		}
 		io.Copy(io.Discard, helperReader)
 		helperReader.Close()
@@ -482,14 +503,25 @@ func (d *DockerOrchestrator) SelfUpdate(ctx context.Context, img string) error {
 
 	resp, err := d.client.ContainerCreate(ctx, helperCfg, helperHostCfg, nil, nil, helperName)
 	if err != nil {
-		return fmt.Errorf("create updater helper: %w", err)
+		return false, fmt.Errorf("create updater helper: %w", err)
 	}
 	if err := d.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("start updater helper: %w", err)
+		return false, fmt.Errorf("start updater helper: %w", err)
 	}
 
 	log.Printf("SelfUpdate: helper container %s launched; control-plane will restart shortly on image %s", helperName, targetImage)
-	return nil
+	return true, nil
+}
+
+// shortImageID trims a full "sha256:..." image ID down to a short, log-
+// friendly form (12 hex chars, matching `docker images` column width).
+func shortImageID(id string) string {
+	const prefix = "sha256:"
+	trimmed := strings.TrimPrefix(id, prefix)
+	if len(trimmed) > 12 {
+		return trimmed[:12]
+	}
+	return trimmed
 }
 
 // selfUpdateRunArgs reconstructs the `docker run` argument list needed to

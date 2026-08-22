@@ -742,20 +742,27 @@ var selfDeploymentLabelKeys = []string{"app.kubernetes.io/name", "app.kubernetes
 // by Kubernetes once the new ReplicaSet's pod is ready (Recreate strategy —
 // see helm/templates/deployment.yaml — takes the old pod down first).
 //
-// image, when empty, means "same image reference, re-pull" — the container
-// image field is left as the deployment's live value, but a rollout is still
-// forced via a restart annotation (matching `kubectl rollout restart`
-// semantics), so imagePullPolicy: Always re-pulls even an unchanged tag.
-func (k *KubernetesOrchestrator) SelfUpdate(ctx context.Context, img string) error {
+// image, when empty, means "same image reference, re-pull". Before patching
+// anything, SelfUpdate resolves the target reference's current manifest
+// digest against its registry and compares it to the digest this pod is
+// actually running (from the live pod's ContainerStatuses.ImageID -- the
+// same field GetInstanceImageInfo reports). A match means the tag was asked
+// to be refreshed but nothing new is actually available, so the rollout
+// (and the resulting pod churn) is skipped. The control plane has no local
+// image cache/daemon to pull-and-compare against the way the Docker backend
+// does, so this is a direct registry lookup instead -- see
+// registry_digest.go. Any failure resolving either digest is treated as
+// "can't tell" and fails open into performing the rollout.
+func (k *KubernetesOrchestrator) SelfUpdate(ctx context.Context, img string) (bool, error) {
 	ns := k.ns()
 
 	selfPodName := os.Getenv("HOSTNAME")
 	if selfPodName == "" {
-		return fmt.Errorf("cannot determine own pod name (HOSTNAME env var unset)")
+		return false, fmt.Errorf("cannot determine own pod name (HOSTNAME env var unset)")
 	}
 	selfPod, err := k.clientset.CoreV1().Pods(ns).Get(ctx, selfPodName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("get own pod %s: %w", selfPodName, err)
+		return false, fmt.Errorf("get own pod %s: %w", selfPodName, err)
 	}
 
 	selector := ""
@@ -768,25 +775,30 @@ func (k *KubernetesOrchestrator) SelfUpdate(ctx context.Context, img string) err
 		}
 	}
 	if selector == "" {
-		return fmt.Errorf("own pod %s has no identifying labels; cannot locate control-plane deployment", selfPodName)
+		return false, fmt.Errorf("own pod %s has no identifying labels; cannot locate control-plane deployment", selfPodName)
 	}
 
 	deployments, err := k.clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return fmt.Errorf("list deployments matching %s: %w", selector, err)
+		return false, fmt.Errorf("list deployments matching %s: %w", selector, err)
 	}
 	if len(deployments.Items) != 1 {
-		return fmt.Errorf("expected exactly one control-plane deployment matching %s, found %d", selector, len(deployments.Items))
+		return false, fmt.Errorf("expected exactly one control-plane deployment matching %s, found %d", selector, len(deployments.Items))
 	}
 	dep := deployments.Items[0]
 
 	if len(dep.Spec.Template.Spec.Containers) == 0 {
-		return fmt.Errorf("control-plane deployment %s has no containers", dep.Name)
+		return false, fmt.Errorf("control-plane deployment %s has no containers", dep.Name)
 	}
 	containerName := dep.Spec.Template.Spec.Containers[0].Name
 	targetImage := img
 	if targetImage == "" {
 		targetImage = dep.Spec.Template.Spec.Containers[0].Image
+	}
+
+	if skip := k.selfUpdateDigestUnchanged(ctx, selfPod, targetImage); skip {
+		log.Printf("SelfUpdate: target image %s already matches the running digest; no rollout needed", targetImage)
+		return false, nil
 	}
 
 	patch := fmt.Sprintf(
@@ -797,11 +809,37 @@ func (k *KubernetesOrchestrator) SelfUpdate(ctx context.Context, img string) err
 		ctx, dep.Name, apitypes.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{},
 	)
 	if err != nil {
-		return fmt.Errorf("patch deployment %s: %w", dep.Name, err)
+		return false, fmt.Errorf("patch deployment %s: %w", dep.Name, err)
 	}
 
 	log.Printf("SelfUpdate: patched deployment %s to image %s; rollout in progress", dep.Name, targetImage)
-	return nil
+	return true, nil
+}
+
+// selfUpdateDigestUnchanged reports whether targetImage's current registry
+// digest matches what selfPod is already running. Returns false ("proceed
+// with the rollout") whenever either digest can't be determined -- an
+// unnecessary restart is far cheaper than silently skipping a real update.
+func (k *KubernetesOrchestrator) selfUpdateDigestUnchanged(ctx context.Context, selfPod *corev1.Pod, targetImage string) bool {
+	runningDigest := ""
+	for _, cs := range selfPod.Status.ContainerStatuses {
+		if idx := strings.Index(cs.ImageID, "sha256:"); idx >= 0 {
+			runningDigest = cs.ImageID[idx:]
+			break
+		}
+	}
+	if runningDigest == "" {
+		log.Printf("SelfUpdate: could not read running image digest from pod status; proceeding with rollout")
+		return false
+	}
+
+	targetDigest, err := resolveManifestDigest(ctx, targetImage)
+	if err != nil {
+		log.Printf("SelfUpdate: could not resolve registry digest for %s (%v); proceeding with rollout", targetImage, err)
+		return false
+	}
+
+	return targetDigest == runningDigest
 }
 
 // --- Helpers ---
