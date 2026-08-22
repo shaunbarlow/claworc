@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -526,8 +527,21 @@ func shortImageID(id string) string {
 
 // selfUpdateRunArgs reconstructs the `docker run` argument list needed to
 // recreate the control-plane container from its own live inspect data:
-// same name, image, published ports, binds/mounts, env, network, and
-// restart policy.
+// same name, image, published ports, binds/mounts, env, network, labels,
+// and restart policy.
+//
+// Labels matter more than they might look: a container started via
+// `docker compose up` carries com.docker.compose.project/service/
+// config-hash/etc. labels that compose uses (not the container name) to
+// recognize "this is my container" on the next `docker compose up`.
+// Without reproducing them here, a compose-managed control-plane would
+// come back from a self-update as a plain, unlabeled container still named
+// "claworc" -- and the next `docker compose up -d` would see the name
+// already taken by a container it doesn't recognize as its own, rather than
+// adopting it, and fail with a name conflict instead of reconciling.
+// Reproducing every label the live container had (compose-added or
+// otherwise) keeps the recreated container indistinguishable from one
+// compose or install.sh would have created directly.
 func selfUpdateRunArgs(name, img string, inspect types.ContainerJSON) []string {
 	args := []string{"run", "-d", "--name", name, "--restart", "unless-stopped"}
 
@@ -558,6 +572,17 @@ func selfUpdateRunArgs(name, img string, inspect types.ContainerJSON) []string {
 	if inspect.Config != nil {
 		for _, e := range inspect.Config.Env {
 			args = append(args, "-e", e)
+		}
+		// Sort keys for deterministic output (map iteration order is random in
+		// Go; stable args make the generated script/log line reproducible and
+		// easy to diff between runs).
+		labelKeys := make([]string, 0, len(inspect.Config.Labels))
+		for k := range inspect.Config.Labels {
+			labelKeys = append(labelKeys, k)
+		}
+		sort.Strings(labelKeys)
+		for _, k := range labelKeys {
+			args = append(args, "--label", fmt.Sprintf("%s=%s", k, inspect.Config.Labels[k]))
 		}
 	}
 	args = append(args, img)

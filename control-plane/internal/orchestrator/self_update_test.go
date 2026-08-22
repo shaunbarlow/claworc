@@ -12,12 +12,22 @@ import (
 
 // TestSelfUpdateRunArgs_ReproducesLiveContainerConfig verifies the docker-run
 // argument list rebuilt from a live container's inspect data carries over
-// its binds, published ports, network, and env -- everything the helper
-// container needs to recreate an equivalent container on the new image.
+// its binds, published ports, network, env, and labels -- everything the
+// helper container needs to recreate an equivalent container on the new
+// image. Labels matter beyond bookkeeping: a compose-managed deployment
+// relies on com.docker.compose.* labels (not the container name) for
+// `docker compose up` to recognize its own container on the next run --
+// dropping them would make the recreated container invisible to compose
+// and cause a name conflict on the next `docker compose up -d`.
 func TestSelfUpdateRunArgs_ReproducesLiveContainerConfig(t *testing.T) {
 	inspect := types.ContainerJSON{
 		Config: &container.Config{
 			Env: []string{"CLAWORC_DATA_PATH=/app/data", "FOO=bar"},
+			Labels: map[string]string{
+				"com.docker.compose.project": "claworc",
+				"com.docker.compose.service": "control-plane",
+				"managed-by":                 "claworc",
+			},
 		},
 		ContainerJSONBase: &types.ContainerJSONBase{
 			HostConfig: &container.HostConfig{
@@ -51,6 +61,9 @@ func TestSelfUpdateRunArgs_ReproducesLiveContainerConfig(t *testing.T) {
 		"--network claworc",
 		"-e CLAWORC_DATA_PATH=/app/data",
 		"-e FOO=bar",
+		"--label com.docker.compose.project=claworc",
+		"--label com.docker.compose.service=control-plane",
+		"--label managed-by=claworc",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected run args to contain %q, got: %s", want, joined)
