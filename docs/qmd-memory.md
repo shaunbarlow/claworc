@@ -28,7 +28,35 @@ Every memory-affecting value resolves in three layers:
 | `max_results` | `memory.qmd.limits.maxResults` | 1–50 |
 | `sessions_enabled` | `memory.qmd.sessions.enabled` | index session transcripts |
 | `include_default_memory` | `memory.qmd.includeDefaultMemory` | workspace `MEMORY.md` / `memory/**/*.md` |
-| `advanced` | deep-merged into `memory.qmd` last | escape hatch for scope rules, timeouts, debounce, ... |
+| `scope` | `memory.qmd.scope` | which chat types see QMD results; see below |
+| `advanced` | deep-merged into `memory.qmd` last | escape hatch for timeouts, debounce, custom scope rules beyond direct/group/channel, ... |
+
+### Scope (`memory.qmd.scope`)
+
+OpenClaw's own default only surfaces QMD search results in **direct** chats:
+`{default: "deny", rules: [{action: "allow", match: {chatType: "direct"}}]}`.
+Group chats and channels (e.g. a Discord server channel) get denied and
+return empty results until scope is widened.
+
+`MemoryQmdScope` (Go: `internal/handlers/memory.go`, TS:
+`common/types/instance.ts`):
+
+```json5
+{
+  "default": "deny",
+  "rules": [
+    { "action": "allow", "chat_type": "direct" },
+    { "action": "allow", "chat_type": "channel" }
+  ]
+}
+```
+
+`chat_type` accepts `direct` / `group` / `channel` and renders to OpenClaw's
+`match: {chatType: ...}` shape. The UI toggle only offers the two common
+presets (direct-only vs. all chat types); anything more granular (e.g. a
+single allow-listed channel) goes in the `advanced` escape hatch as a raw
+`memory.qmd.scope` object, which is deep-merged over the curated `scope`
+field if both are set.
 
 ## Shared folders in the index
 

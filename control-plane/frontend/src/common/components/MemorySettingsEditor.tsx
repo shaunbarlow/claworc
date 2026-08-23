@@ -1,5 +1,29 @@
 import { useMemo, useState } from "react";
-import type { IndexedFolder, MemoryQmdSettings } from "@common/types/instance";
+import type { IndexedFolder, MemoryQmdScope, MemoryQmdSettings } from "@common/types/instance";
+
+/** Canonical scope shapes the simple toggle understands. Anything else
+ * (custom per-channel rules, etc.) falls through to the Advanced JSON
+ * escape hatch instead of this control. */
+const SCOPE_DIRECT_ONLY: MemoryQmdScope = {
+  default: "deny",
+  rules: [{ action: "allow", chat_type: "direct" }],
+};
+const SCOPE_ALL_CHATS: MemoryQmdScope = {
+  default: "deny",
+  rules: [
+    { action: "allow", chat_type: "direct" },
+    { action: "allow", chat_type: "group" },
+    { action: "allow", chat_type: "channel" },
+  ],
+};
+
+function scopeToggleState(scope: MemoryQmdScope | undefined): "" | "true" | "false" {
+  if (!scope) return "";
+  const json = JSON.stringify(scope);
+  if (json === JSON.stringify(SCOPE_ALL_CHATS)) return "true";
+  if (json === JSON.stringify(SCOPE_DIRECT_ONLY)) return "false";
+  return "";
+}
 
 export interface MemoryBackendOption {
   value: "" | "builtin" | "qmd";
@@ -53,6 +77,7 @@ export default function MemorySettingsEditor({
   const [includeDefaultMemory, setIncludeDefaultMemory] = useState<"" | "true" | "false">(
     qmd.include_default_memory == null ? "" : qmd.include_default_memory ? "true" : "false",
   );
+  const [groupChatMemory, setGroupChatMemory] = useState<"" | "true" | "false">(scopeToggleState(qmd.scope));
   const [advanced, setAdvanced] = useState(
     qmd.advanced && Object.keys(qmd.advanced).length > 0 ? JSON.stringify(qmd.advanced, null, 2) : "",
   );
@@ -83,6 +108,8 @@ export default function MemorySettingsEditor({
     if (maxResults) out.max_results = Number(maxResults);
     if (sessionsEnabled) out.sessions_enabled = sessionsEnabled === "true";
     if (includeDefaultMemory) out.include_default_memory = includeDefaultMemory === "true";
+    if (groupChatMemory === "true") out.scope = SCOPE_ALL_CHATS;
+    if (groupChatMemory === "false") out.scope = SCOPE_DIRECT_ONLY;
     if (advanced.trim() && !advancedError) out.advanced = JSON.parse(advanced);
     return out;
   };
@@ -95,7 +122,19 @@ export default function MemorySettingsEditor({
       return true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend, qmd, draftBackend, searchMode, updateInterval, maxResults, sessionsEnabled, includeDefaultMemory, advanced, advancedError]);
+  }, [
+    backend,
+    qmd,
+    draftBackend,
+    searchMode,
+    updateInterval,
+    maxResults,
+    sessionsEnabled,
+    includeDefaultMemory,
+    groupChatMemory,
+    advanced,
+    advancedError,
+  ]);
 
   const canSave = dirty && !isSaving && !advancedError && !intervalError;
   const effectiveDraftBackend = draftBackend === "" ? (inheritBackend ?? "builtin") : draftBackend;
@@ -192,6 +231,26 @@ export default function MemorySettingsEditor({
                   ? `Inherit (${effectiveQmd.include_default_memory ? "enabled" : "disabled"})`
                   : "Default (enabled)",
               )}
+            </div>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                {triState(
+                  "Group/Channel Memory Search",
+                  groupChatMemory,
+                  setGroupChatMemory,
+                  (() => {
+                    const state = scopeToggleState(effectiveQmd?.scope);
+                    if (state === "true") return "Inherit (all chat types)";
+                    if (state === "false") return "Inherit (direct chats only)";
+                    return "Default (direct chats only)";
+                  })(),
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  OpenClaw only surfaces QMD results in direct chats by default. Enable to also allow
+                  results in group chats and channels (e.g. Discord). Custom per-channel rules need the
+                  Advanced JSON field below instead.
+                </p>
+              </div>
             </div>
 
             {indexedFolders !== undefined && (

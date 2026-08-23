@@ -195,6 +195,21 @@ export interface InstanceConfigUpdate {
   restarted: boolean;
 }
 
+/** One memory.qmd.scope rule: allow/deny gated on chat type. Renders to
+ * OpenClaw's `{action, match: {chatType}}` shape in buildMemoryConfig. */
+export interface MemoryQmdScopeRule {
+  action: "allow" | "deny";
+  chat_type: "direct" | "group" | "channel";
+}
+
+/** Which chat types can see QMD search results (memory.qmd.scope). OpenClaw's
+ * own default is `{default: "deny", rules: [{action: "allow", match: {chatType: "direct"}}]}` —
+ * i.e. direct chats only. */
+export interface MemoryQmdScope {
+  default?: "allow" | "deny";
+  rules?: MemoryQmdScopeRule[];
+}
+
 /** Curated QMD memory settings managed by Claworc (see docs/qmd-memory.md).
  * Unset fields inherit: instance override → global default → OpenClaw default. */
 export interface MemoryQmdSettings {
@@ -206,6 +221,9 @@ export interface MemoryQmdSettings {
   sessions_enabled?: boolean;
   /** Index MEMORY.md and memory/ markdown in the workspace. */
   include_default_memory?: boolean;
+  /** Which chat types (direct/group/channel) can see QMD search results.
+   * Unset = inherit; OpenClaw's own default only allows direct chats. */
+  scope?: MemoryQmdScope;
   /** Raw JSON object deep-merged into memory.qmd for anything not modeled above. */
   advanced?: Record<string, unknown>;
 }

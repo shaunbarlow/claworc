@@ -40,6 +40,68 @@ func TestParseMemoryQmdSettings(t *testing.T) {
 	}
 }
 
+func TestParseMemoryQmdSettings_Scope(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"valid direct+channel", `{"scope":{"default":"deny","rules":[{"action":"allow","chat_type":"direct"},{"action":"allow","chat_type":"channel"}]}}`, false},
+		{"valid default only", `{"scope":{"default":"allow"}}`, false},
+		{"bad default", `{"scope":{"default":"maybe"}}`, true},
+		{"bad rule action", `{"scope":{"rules":[{"action":"sometimes","chat_type":"direct"}]}}`, true},
+		{"bad chat type", `{"scope":{"rules":[{"action":"allow","chat_type":"everywhere"}]}}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseMemoryQmdSettings([]byte(tc.raw))
+			if (err != nil) != tc.wantErr {
+				t.Errorf("parseMemoryQmdSettings(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildMemoryConfig_Scope(t *testing.T) {
+	setupTestDB(t)
+	database.SetSetting("default_memory_backend", "qmd")
+
+	inst := nonLegacyInstance(t, "bot-scope1", "Scope1")
+	scopeJSON := `{"scope":{"default":"deny","rules":[{"action":"allow","chat_type":"direct"},{"action":"allow","chat_type":"channel"}]}}`
+	if err := database.DB.Model(&inst).Update("memory_qmd", scopeJSON).Error; err != nil {
+		t.Fatalf("seed override: %v", err)
+	}
+	database.DB.First(&inst, inst.ID)
+
+	cfg := buildMemoryConfig(&inst)
+	qmd, ok := cfg["qmd"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("qmd subtree missing: %#v", cfg)
+	}
+	scope, ok := qmd["scope"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("scope subtree missing: %#v", qmd)
+	}
+	if scope["default"] != "deny" {
+		t.Errorf("scope.default = %v, want deny", scope["default"])
+	}
+	rules, ok := scope["rules"].([]map[string]interface{})
+	if !ok || len(rules) != 2 {
+		t.Fatalf("scope.rules = %#v, want 2 entries", scope["rules"])
+	}
+	if rules[0]["action"] != "allow" {
+		t.Errorf("rules[0].action = %v", rules[0]["action"])
+	}
+	match0, ok := rules[0]["match"].(map[string]interface{})
+	if !ok || match0["chatType"] != "direct" {
+		t.Errorf("rules[0].match = %#v, want chatType direct", rules[0]["match"])
+	}
+	match1, ok := rules[1]["match"].(map[string]interface{})
+	if !ok || match1["chatType"] != "channel" {
+		t.Errorf("rules[1].match = %#v, want chatType channel", rules[1]["match"])
+	}
+}
+
 func TestMergeMemoryQmdSettings(t *testing.T) {
 	global := MemoryQmdSettings{
 		SearchMode:     "search",

@@ -18,6 +18,23 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// MemoryQmdScopeRule is one memory.qmd.scope rule: allow/deny gated on chat
+// type. Renders to OpenClaw's `{action, match: {chatType}}` shape.
+type MemoryQmdScopeRule struct {
+	Action   string `json:"action"`
+	ChatType string `json:"chat_type"`
+}
+
+// MemoryQmdScope controls which chat types can see QMD search results
+// (memory.qmd.scope). OpenClaw's own default only allows direct chats:
+// {default: "deny", rules: [{action: "allow", match: {chatType: "direct"}}]}.
+// A nil Scope means "inherit"; an explicit Scope with an empty Rules slice
+// still round-trips (e.g. deny-everything via Default alone).
+type MemoryQmdScope struct {
+	Default string                `json:"default,omitempty"`
+	Rules   []MemoryQmdScopeRule `json:"rules,omitempty"`
+}
+
 // MemoryQmdSettings is the curated subset of OpenClaw's memory.qmd.* config
 // that Claworc manages, plus a raw escape hatch for everything else. It is
 // stored as JSON both in the default_memory_qmd setting (global defaults) and
@@ -35,6 +52,10 @@ type MemoryQmdSettings struct {
 	// IncludeDefaultMemory maps to memory.qmd.includeDefaultMemory
 	// (MEMORY.md / memory/**/*.md in the workspace).
 	IncludeDefaultMemory *bool `json:"include_default_memory,omitempty"`
+	// Scope maps to memory.qmd.scope: which chat types (direct/group/channel)
+	// can see QMD search results. Nil = inherit; OpenClaw's own default only
+	// allows direct chats, so group/channel results need an explicit rule.
+	Scope *MemoryQmdScope `json:"scope,omitempty"`
 	// Advanced is a raw JSON object deep-merged into the generated
 	// memory.qmd subtree last, so any OpenClaw option Claworc doesn't model
 	// (scope rules, timeouts, debounce, ...) remains reachable.
@@ -70,6 +91,21 @@ func parseMemoryQmdSettings(raw []byte) (MemoryQmdSettings, error) {
 	}
 	if s.MaxResults != nil && (*s.MaxResults < 1 || *s.MaxResults > 50) {
 		return s, fmt.Errorf("max_results must be between 1 and 50")
+	}
+	if s.Scope != nil {
+		if s.Scope.Default != "" && s.Scope.Default != "allow" && s.Scope.Default != "deny" {
+			return s, fmt.Errorf("scope.default must be \"allow\" or \"deny\"")
+		}
+		for i, r := range s.Scope.Rules {
+			if r.Action != "allow" && r.Action != "deny" {
+				return s, fmt.Errorf("scope.rules[%d].action must be \"allow\" or \"deny\"", i)
+			}
+			switch r.ChatType {
+			case "direct", "group", "channel":
+			default:
+				return s, fmt.Errorf("scope.rules[%d].chat_type must be one of direct, group, channel", i)
+			}
+		}
 	}
 	if len(s.Advanced) > 0 {
 		var obj map[string]interface{}
@@ -108,6 +144,9 @@ func mergeMemoryQmdSettings(global, override MemoryQmdSettings) MemoryQmdSetting
 	}
 	if override.IncludeDefaultMemory != nil {
 		out.IncludeDefaultMemory = override.IncludeDefaultMemory
+	}
+	if override.Scope != nil {
+		out.Scope = override.Scope
 	}
 	if len(override.Advanced) > 0 {
 		out.Advanced = override.Advanced
@@ -208,6 +247,25 @@ func buildMemoryConfig(inst *database.Instance) map[string]interface{} {
 	}
 	if s.IncludeDefaultMemory != nil {
 		qmd["includeDefaultMemory"] = *s.IncludeDefaultMemory
+	}
+	if s.Scope != nil {
+		scope := map[string]interface{}{}
+		if s.Scope.Default != "" {
+			scope["default"] = s.Scope.Default
+		}
+		if len(s.Scope.Rules) > 0 {
+			rules := make([]map[string]interface{}, 0, len(s.Scope.Rules))
+			for _, r := range s.Scope.Rules {
+				rules = append(rules, map[string]interface{}{
+					"action": r.Action,
+					"match":  map[string]interface{}{"chatType": r.ChatType},
+				})
+			}
+			scope["rules"] = rules
+		}
+		if len(scope) > 0 {
+			qmd["scope"] = scope
+		}
 	}
 
 	if folders := qmdIndexedFolders(inst.ID); len(folders) > 0 {
