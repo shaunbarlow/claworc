@@ -88,10 +88,29 @@ RUN mkdir -p /opt/homebrew-skeleton && \
 # dependency) may fall back to node-gyp, which bun shims with a script that
 # invokes `bun` from PATH — without the symlink the install dies with
 # "node-gyp: 3: bun: not found" (exit 127).
+# node-llama-cpp (qmd's embedding/rerank backend) ships one ggml-cpu .so per
+# x86 microarchitecture and dlopen()s whichever variant scores highest
+# against runtime cpuid flags. On this fleet's virtualized CPUs, cpuid
+# advertises AVX512 but the hypervisor doesn't execute it faithfully: `qmd
+# vsearch`/`qmd query` (searchMode vsearch|query) run ~60s of embedding/
+# rerank work on an AVX512-dispatched variant, then segfault inside Bun
+# (confirmed 2026-08-23, Bun 1.3.14, node-llama-cpp 3.20.0,
+# node_modules/@node-llama-cpp/linux-x64). Deleting the AVX512 variants
+# below forces the backend registry to fall back to the AVX2 haswell/x64
+# build, which is stable. searchMode "search" (BM25, no embeddings) was
+# unaffected either way. Re-evaluate if this fleet ever runs on bare metal
+# with genuine AVX512 support.
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
     BUN_INSTALL=/opt/bun bun add -g --trust @tobilu/qmd && \
     ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
+    NLC_BASE_SO="$(find /opt/bun/install/global/node_modules/@node-llama-cpp -name libggml-base.so | head -1)" && \
+    if [ -n "$NLC_BASE_SO" ]; then \
+      NLC_CPU_DIR="$(dirname "$NLC_BASE_SO")" && \
+      rm -fv "$NLC_CPU_DIR"/libggml-cpu-cannonlake.so "$NLC_CPU_DIR"/libggml-cpu-skylakex.so "$NLC_CPU_DIR"/libggml-cpu-cascadelake.so "$NLC_CPU_DIR"/libggml-cpu-cooperlake.so "$NLC_CPU_DIR"/libggml-cpu-icelake.so "$NLC_CPU_DIR"/libggml-cpu-sapphirerapids.so "$NLC_CPU_DIR"/libggml-cpu-zen4.so; \
+    else \
+      echo "ERROR: could not locate @node-llama-cpp ggml-cpu binaries to strip AVX512 variants" >&2 && exit 1; \
+    fi && \
     /usr/local/bin/qmd --version
 
 COPY browser.json /defaults/browser.json
