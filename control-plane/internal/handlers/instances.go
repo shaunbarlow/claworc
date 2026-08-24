@@ -785,9 +785,9 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 		envVars["OPENCLAW_INITIAL_DISCORD"] = discordEnv
 	}
 	// Brave (or a future managed search provider) key rides the container
-	// environment the same way; the agent's OpenClaw config only ever holds a
-	// SecretRef pointing at BRAVE_API_KEY (see applySearchConfig), never the
-	// plaintext key.
+	// environment the same way, and the env var is the only place it lives on
+	// the agent — the Brave plugin reads BRAVE_API_KEY itself, so the pushed
+	// OpenClaw config never references the key (see buildSearchConfig).
 	for k, v := range buildSearchEnvVars(&inst) {
 		envVars[k] = v
 	}
@@ -1547,16 +1547,22 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if searchChanged {
-		// Env var (BRAVE_API_KEY) only reaches the container on (re)create, so
-		// reconcile via the same drift-check restart path env-var edits use.
-		// The config push (plugins.entries.brave.*, tools.web.search.provider)
-		// is separate and hot-reloadable, so it goes over SSH without a restart
-		// unless a fresh plugin install forces one.
+		// Two independent channels, both always needed:
+		//   - BRAVE_API_KEY only reaches the container on (re)create, so
+		//     reconcile it via the same drift-check restart path env-var edits
+		//     use.
+		//   - plugins.entries.brave.* / tools.web.search.provider live in the
+		//     agent's own config and only ever arrive over SSH.
+		// The push must therefore happen either way. Gating it on "no restart
+		// was needed" is what made the feature look broken on a fresh setup:
+		// the very first save is the one that adds BRAVE_API_KEY, so it always
+		// restarted and never pushed, leaving the agent with the key but no
+		// provider selected until the user happened to save a second time.
+		// pushSearchConfig's SSH wait is sized to ride out that restart.
 		if EnsureEnvPropagated(r.Context(), inst, callerID(r), "BRAVE_API_KEY") {
 			log.Printf("instance %d: restarting to apply updated search provider env", inst.ID)
-		} else {
-			pushSearchConfig(inst.ID, inst.Name)
 		}
+		pushSearchConfig(inst.ID, inst.Name)
 	}
 
 	// Update default model

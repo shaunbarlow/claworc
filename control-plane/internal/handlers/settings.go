@@ -390,17 +390,26 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		var instances []database.Instance
 		database.DB.Find(&instances)
 		for i := range instances {
-			if effectiveSearchProvider(&instances[i]) != "brave" {
-				continue
-			}
+			// Every instance is considered, not just the ones resolving to
+			// Brave. An instance that just stopped resolving to Brave is
+			// precisely the one that needs work: its BRAVE_API_KEY has to come
+			// back out of the container env, and the tools.web.search.provider
+			// Claworc pinned has to be unset again (applySearchConfig's
+			// teardown branch). Skipping it left the agent pinned to a
+			// provider the operator had already turned off.
 			if EnsureEnvPropagated(r.Context(), instances[i], callerID(r), "BRAVE_API_KEY") {
 				restartingInstances = append(restartingInstances, restartTarget{
 					ID:          instances[i].ID,
 					Name:        instances[i].Name,
 					DisplayName: instances[i].DisplayName,
 				})
-				continue
 			}
+			// The config push is needed whether or not a restart was started
+			// (see the same fix in UpdateInstance): the env var and the agent's
+			// config are separate channels, and only the push writes the
+			// provider selection. Still scoped to running instances — a stopped
+			// agent has no SSH to push over, and picks the config up from the
+			// next save once it is back.
 			if instances[i].Status == "running" && !database.IsLegacyEmbedded(instances[i].ContainerImage) {
 				pushSearchConfig(instances[i].ID, instances[i].Name)
 			}

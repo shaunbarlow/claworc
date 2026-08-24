@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gluk-w/claworc/control-plane/internal/database"
@@ -72,13 +73,13 @@ func effectiveBraveAPIKeyPlain(inst *database.Instance) string {
 }
 
 // buildSearchEnvVars returns the env vars buildCreateParams should inject for
-// the instance's effective search-provider selection. The Brave API key
-// rides the container environment (BRAVE_API_KEY) the same way every other
-// provider key here does; the agent's OpenClaw config only ever holds a
-// SecretRef pointing at that env var (see buildSearchConfig), never the
-// plaintext key. Returns an empty map when no managed provider is selected,
-// so a BRAVE_API_KEY a user set through the generic env-vars editor for
-// their own reasons is left alone.
+// the instance's effective search-provider selection. The Brave API key rides
+// the container environment (BRAVE_API_KEY) the same way Slack and Discord
+// tokens do, and that env var is the *only* place it lives on the agent — the
+// pushed OpenClaw config never references it (see buildSearchConfig).
+// Returns an empty map when no managed provider is selected, so a
+// BRAVE_API_KEY a user set through the generic env-vars editor for their own
+// reasons is left alone.
 func buildSearchEnvVars(inst *database.Instance) map[string]string {
 	out := map[string]string{}
 	if effectiveSearchProvider(inst) != "brave" {
@@ -92,22 +93,40 @@ func buildSearchEnvVars(inst *database.Instance) map[string]string {
 
 // buildSearchConfig resolves the OpenClaw config subtree Claworc pushes for
 // the instance's effective search-provider selection. ok=false means no
-// managed provider is selected — nothing to push, and nothing Claworc owns
-// to unset either.
+// managed provider is selected — nothing to push, and Claworc's own paths
+// have to be torn back down (see applySearchConfig).
+//
+// The API key is deliberately absent from this subtree. The Brave plugin
+// resolves its key as `configured apiKey ?? env BRAVE_API_KEY` (see
+// brave-web-search-provider.runtime, and the `envVars: ["BRAVE_API_KEY"]`
+// declaration in web-search-shared), so the env var Claworc already injects
+// via buildSearchEnvVars is sufficient on its own — exactly how Slack and
+// Discord tokens reach the agent.
+//
+// Writing an apiKey SecretRef here instead was actively harmful. The config
+// lives on the persisted home volume while the env var only reaches the
+// container on (re)create, so any push that landed before the env var did
+// left the agent with a ref it could not resolve — and an unresolved
+// SecretRef is a *startup-fatal* error, not a degraded tool:
+//
+//	Gateway failed to start: required secrets are unavailable.
+//	[WEB_SEARCH_KEY_UNRESOLVED_NO_FALLBACK]
+//	plugins.entries.brave.config.webSearch.apiKey SecretRef is unresolved
+//
+// i.e. selecting a search provider could brick the whole agent, not just web
+// search. Relying on the plugin's env fallback keeps a missing key to what it
+// should be: web_search returns "needs a Brave Search API key" and every
+// other subsystem boots normally.
 func buildSearchConfig(inst *database.Instance) (provider string, webSearchCfg map[string]interface{}, ok bool) {
 	provider = effectiveSearchProvider(inst)
 	if provider != "brave" {
 		return provider, nil, false
 	}
+	// `mode` selects Brave's response shape ("web" vs "llm-context") and is
+	// read straight off this subtree by resolveBraveMode, so it is a real
+	// setting rather than a placeholder.
 	webSearchCfg = map[string]interface{}{
 		"mode": "web",
-	}
-	if effectiveBraveAPIKeyPlain(inst) != "" {
-		webSearchCfg["apiKey"] = map[string]interface{}{
-			"source":   "env",
-			"provider": "default",
-			"id":       "BRAVE_API_KEY",
-		}
 	}
 	return provider, webSearchCfg, true
 }
@@ -168,26 +187,82 @@ func ensureSearchPluginInstalled(ctx context.Context, agent sshproxy.Instance, n
 	return true
 }
 
-// applySearchConfig pushes the resolved search-provider config to the agent
-// over SSH. tools.web.search.* and plugins.entries.<id>.config are both
-// hot-reloadable (see `openclaw config schema.lookup`: reloadKind "none"/
-// "hot"), so an existing, already-installed plugin needs no gateway restart
-// here — only a fresh install does, mirroring EnsureChannelPluginInstalled.
-// Best-effort: failures are logged, same pattern as applyMemoryConfig.
+// searchConfigSet writes one config path on the agent and logs any failure.
+// what names the write for the log line. Returns false when the write did not
+// land.
+//
+// `--json` is passed only for values that really are JSON. It is an alias for
+// `--strict-json`, so handing it a bare string makes OpenClaw reject the whole
+// write:
+//
+//	Error: Could not parse "brave" as JSON for --strict-json.
+//	Unexpected token 'b', "brave" is not valid JSON.
+//	... For plain strings, omit --strict-json.
+//
+// That is how tools.web.search.provider silently never got written.
+func searchConfigSet(ctx context.Context, agent sshproxy.Instance, name, what, path, value string, extraArgs ...string) bool {
+	args := append([]string{"config", "set", path, value}, extraArgs...)
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, args...)
+	if err != nil {
+		log.Printf("search-config: %s: set %s: %v", name, what, err)
+		return false
+	}
+	if code != 0 {
+		log.Printf("search-config: %s: set %s failed: %s", name, what, utils.SanitizeForLog(stderr))
+		return false
+	}
+	return true
+}
+
+// searchConfigUnset clears one Claworc-owned config path on the agent.
+//
+// `config unset` takes no `--json` (OpenClaw answers "--json can only be used
+// with --dry-run" and writes nothing), and it exits non-zero with "Config path
+// not found" when the path was never set — which is the normal case for an
+// agent that never had a managed provider. Both were previously treated as
+// hard failures, so the entire switch-back-to-auto teardown was dead code.
+//
+// Returns whether the path is now clear: an absent path counts as success,
+// since the caller only wants it gone.
+func searchConfigUnset(ctx context.Context, agent sshproxy.Instance, name, path string) bool {
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "unset", path)
+	if err != nil {
+		log.Printf("search-config: %s: unset %s: %v", name, path, err)
+		return false
+	}
+	if code == 0 {
+		return true
+	}
+	if strings.Contains(stderr, "Config path not found") {
+		return true // never set on this agent; nothing to clear
+	}
+	log.Printf("search-config: %s: unset %s failed: %s", name, path, utils.SanitizeForLog(stderr))
+	return false
+}
+
+// applySearchConfig reconciles the agent's search-provider config over SSH,
+// in both directions: it writes Claworc's paths when a managed provider is
+// selected and clears them when the selection goes back to "auto".
+//
+// tools.web.search.* and plugins.entries.<id>.config are hot-reloadable (see
+// `openclaw config schema.lookup`: reloadKind "none"/"hot"), so an existing,
+// already-installed plugin needs no gateway restart here — only a fresh
+// install does, mirroring EnsureChannelPluginInstalled. Best-effort: failures
+// are logged, same pattern as applyMemoryConfig.
+//
+// Nothing here carries the API key; it reaches the agent only as the
+// BRAVE_API_KEY container env var (see buildSearchConfig for why).
 func applySearchConfig(ctx context.Context, agent sshproxy.Instance, name string, inst *database.Instance) {
 	name = utils.SanitizeForLog(name)
 	provider, webSearchCfg, ok := buildSearchConfig(inst)
 
 	if !ok {
-		// No managed provider selected. Unconditionally unsetting on every
-		// push would be a wasted round-trip for the common case (an
-		// instance that never touched search config), but config unset is
-		// itself a no-op when the path isn't set, so it's safe to always
-		// issue — this only matters for the switch-back-to-auto path.
-		if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "unset", "tools.web.search.provider", "--json"); err != nil {
-			log.Printf("search-config: unset provider for %s: %v", name, err)
-		} else if code != 0 {
-			log.Printf("search-config: unset provider for %s failed: %s", name, utils.SanitizeForLog(stderr))
+		// Back to "auto": drop the paths Claworc owns so a provider it
+		// previously pinned stops being used. Unsetting an absent path is a
+		// tolerated no-op, so this is safe to issue unconditionally.
+		searchConfigUnset(ctx, agent, name, "tools.web.search.provider")
+		for pluginID := range searchProviderPluginSpecs {
+			searchConfigUnset(ctx, agent, name, "plugins.entries."+pluginID+".enabled")
 		}
 		return
 	}
@@ -196,26 +271,18 @@ func applySearchConfig(ctx context.Context, agent sshproxy.Instance, name string
 
 	webSearchJSON, err := json.Marshal(webSearchCfg)
 	if err != nil {
-		log.Printf("search-config: marshal %s webSearch config for %s: %v", provider, name, err)
+		log.Printf("search-config: %s: marshal %s webSearch config: %v", name, provider, err)
 		return
 	}
-	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "plugins.entries."+provider+".config.webSearch", string(webSearchJSON), "--replace", "--json"); err != nil {
-		log.Printf("search-config: set %s webSearch config for %s: %v", provider, name, err)
-		return
-	} else if code != 0 {
-		log.Printf("search-config: set %s webSearch config for %s failed: %s", provider, name, utils.SanitizeForLog(stderr))
+	if !searchConfigSet(ctx, agent, name, provider+" webSearch config",
+		"plugins.entries."+provider+".config.webSearch", string(webSearchJSON), "--replace", "--json") {
 		return
 	}
-	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "plugins.entries."+provider+".enabled", "true", "--json"); err != nil {
-		log.Printf("search-config: enable %s plugin for %s: %v", provider, name, err)
-	} else if code != 0 {
-		log.Printf("search-config: enable %s plugin for %s failed: %s", provider, name, utils.SanitizeForLog(stderr))
-	}
-	if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "tools.web.search.provider", provider, "--json"); err != nil {
-		log.Printf("search-config: set tools.web.search.provider for %s: %v", name, err)
-	} else if code != 0 {
-		log.Printf("search-config: set tools.web.search.provider for %s failed: %s", name, utils.SanitizeForLog(stderr))
-	}
+	searchConfigSet(ctx, agent, name, provider+" plugin enabled",
+		"plugins.entries."+provider+".enabled", "true", "--json")
+	// Plain string value — no --json (see searchConfigSet).
+	searchConfigSet(ctx, agent, name, "tools.web.search.provider",
+		"tools.web.search.provider", provider)
 
 	if installedNow {
 		if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
