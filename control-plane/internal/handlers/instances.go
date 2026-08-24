@@ -1920,47 +1920,19 @@ func UpdateInstanceImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	effectiveResolution := getEffectiveResolution(inst)
-	effectiveTimezone := getEffectiveTimezone(inst)
-	effectiveUserAgent := getEffectiveUserAgent(inst)
-
-	// Decrypt gateway token for env vars
-	envVars := map[string]string{}
-	if inst.GatewayToken != "" {
-		if plain, err := utils.Decrypt(inst.GatewayToken); err == nil {
-			envVars["OPENCLAW_GATEWAY_TOKEN"] = plain
-		}
-	}
-	envVars["CLAWORC_INSTANCE_ID"] = fmt.Sprintf("%d", inst.ID)
-
 	instID := inst.ID
 	instName := inst.Name
 	startInstanceTask(taskmanager.TaskInstanceImageUpdate, inst.ID, callerID(r), inst.DisplayName,
 		fmt.Sprintf("Updating image for %s", inst.DisplayName),
 		func(ctx context.Context) {
 			// UpdateImage replaces the whole pod spec (see RestartInstance),
-			// so placement/SA/ports must be threaded through here too -
-			// otherwise a plain image update would silently strip them.
-			placement := instancePlacementParams(inst)
-			err := orch.UpdateImage(ctx, instName, orchestrator.CreateParams{
-				Name:                      instName,
-				CPURequest:                inst.CPURequest,
-				CPULimit:                  inst.CPULimit,
-				MemoryRequest:             inst.MemoryRequest,
-				MemoryLimit:               inst.MemoryLimit,
-				ContainerImage:            effectiveImage,
-				VNCResolution:             effectiveResolution,
-				Timezone:                  effectiveTimezone,
-				UserAgent:                 effectiveUserAgent,
-				EnvVars:                   envVars,
-				PodAnnotations:            placement.PodAnnotations,
-				NodeSelector:              placement.NodeSelector,
-				Tolerations:               placement.Tolerations,
-				Affinity:                  inst.Affinity,
-				ServiceAccountAnnotations: placement.ServiceAccountAnnotations,
-				Ports:                     placement.Ports,
-				SharedFolderMounts:        getSharedFolderMounts(instID),
-			})
+			// so it must be built from the exact same source of truth as a
+			// normal restart (buildCreateParams) rather than a hand-rolled
+			// subset of fields - a hand-rolled EnvVars map here previously
+			// silently dropped global/instance env var overrides and the
+			// OPENCLAW_INITIAL_SLACK/DISCORD vars on every image update.
+			params := buildCreateParams(inst)
+			err := orch.UpdateImage(ctx, instName, params)
 			if err != nil {
 				log.Printf("Failed to update image for instance %d: %v", instID, err)
 				finalStatus := "error"
