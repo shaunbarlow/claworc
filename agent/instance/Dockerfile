@@ -88,41 +88,31 @@ RUN mkdir -p /opt/homebrew-skeleton && \
 # dependency) may fall back to node-gyp, which bun shims with a script that
 # invokes `bun` from PATH — without the symlink the install dies with
 # "node-gyp: 3: bun: not found" (exit 127).
-# node-llama-cpp (qmd's embedding/rerank backend) ships one ggml-cpu .so per
-# x86 microarchitecture and dlopen()s whichever variant scores highest
-# against runtime cpuid flags. On this fleet's virtualized CPUs, cpuid
-# advertises AVX512 but the hypervisor doesn't execute it faithfully: `qmd
-# vsearch`/`qmd query` (searchMode vsearch|query) run ~60s of embedding/
-# rerank work on an AVX512-dispatched variant, then segfault inside Bun
-# (confirmed 2026-08-23, Bun 1.3.14, node-llama-cpp 3.20.0,
-# node_modules/@node-llama-cpp/linux-x64). Deleting the AVX512 variants
-# below forces the backend registry to fall back to the AVX2 haswell/x64
-# build, which is stable. searchMode "search" (BM25, no embeddings) was
-# unaffected either way. Re-evaluate if this fleet ever runs on bare metal
-# with genuine AVX512 support.
-# node-llama-cpp ships a SEPARATE libggml-base.so per backend flavor
-# (linux-x64, linux-x64-cuda, linux-x64-cuda-ext, linux-x64-vulkan,
-# linux-arm64, linux-armv7l), each with its own full set of ggml-cpu .so
-# variants. An earlier version of this step used `find ... | head -1`,
-# which only stripped ONE of those directories (whichever `find` happened
-# to return first) and left AVX512 variants intact in the others —
-# verified 2026-08-24 on a live agent instance: `find` returned the
-# linux-x64-vulkan dir first (correctly stripped), but this fleet has no
-# GPU so node-llama-cpp actually dlopen()s from linux-x64, which still had
-# all 7 AVX512 .so files and reproduced the original vsearch segfault.
-# Loop over every directory `find` reports instead of taking just the
-# first.
+# node-llama-cpp (qmd's embedding/rerank backend) auto-detects GPU support
+# via getLlama("auto"), which on this fleet's headless/GPU-less virtualized
+# hosts probes Vulkan, determines the prebuilt Vulkan binary is
+# incompatible, and segfaults inside Bun while falling back to the CPU
+# path (`qmd vsearch`/`qmd query` run ~45-90s of embedding/rerank work,
+# then `panic: Segmentation fault`). This is an open upstream bug, not an
+# AVX512/cpuid dispatch issue — see withcatai/node-llama-cpp#554
+# ("Segmentation fault on CPU fallback when Vulkan prebuilt binary is
+# incompatible (Linux x64, no GPU)"), reproduced independently here
+# 2026-08-24 on Bun 1.4.0 with the full untouched set of node-llama-cpp
+# ggml-cpu binaries (an earlier fix in this file mistakenly stripped
+# AVX512 .so variants, which correlated with but did not cause the
+# crash — removing them entirely did not stop the segfault). Setting
+# QMD_LLAMA_GPU=false makes qmd skip the GPU auto-detect/Vulkan-probe
+# path and go straight to CPU inference, which avoids the crash;
+# verified working end-to-end (embed + vsearch, real results, exit 0)
+# with this env var alone, no binary stripping needed. Pin @tobilu/qmd to
+# the exact version this was verified against so a future qmd release
+# doesn't silently change node-llama-cpp's transitive version underneath
+# this fix; bump deliberately and re-verify vsearch/query when upgrading.
+ENV QMD_LLAMA_GPU=false
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
-    BUN_INSTALL=/opt/bun bun add -g --trust @tobilu/qmd && \
+    BUN_INSTALL=/opt/bun bun add -g --trust @tobilu/qmd@2.8.3 && \
     ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
-    NLC_CPU_DIRS="$(find /opt/bun/install/global/node_modules/@node-llama-cpp -name libggml-base.so -exec dirname {} \; | sort -u)" && \
-    if [ -z "$NLC_CPU_DIRS" ]; then \
-      echo "ERROR: could not locate @node-llama-cpp ggml-cpu binaries to strip AVX512 variants" >&2 && exit 1; \
-    fi && \
-    echo "$NLC_CPU_DIRS" | while IFS= read -r NLC_CPU_DIR; do \
-      rm -fv "$NLC_CPU_DIR"/libggml-cpu-cannonlake.so "$NLC_CPU_DIR"/libggml-cpu-skylakex.so "$NLC_CPU_DIR"/libggml-cpu-cascadelake.so "$NLC_CPU_DIR"/libggml-cpu-cooperlake.so "$NLC_CPU_DIR"/libggml-cpu-icelake.so "$NLC_CPU_DIR"/libggml-cpu-sapphirerapids.so "$NLC_CPU_DIR"/libggml-cpu-zen4.so; \
-    done && \
     /usr/local/bin/qmd --version
 
 COPY browser.json /defaults/browser.json
