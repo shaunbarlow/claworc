@@ -117,9 +117,15 @@ agent-push-chrome:
 	@echo "Pushing $(BROWSER_CHROME_IMAGE):$(TAG) (chrome browser)..."
 	docker buildx build --platform linux/amd64 $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROME_IMAGE):$(TAG) -f agent/browser/Dockerfile.chrome --push agent/browser/
 
+# Brave ships no arm64 Linux package (Dockerfile.brave fails fast on non-
+# amd64), so unlike the other push targets this stays single-arch amd64 to
+# match agent-build-brave above. Pre-existing bug: this used to build
+# $(PLATFORMS) (amd64+arm64) and broke on arm64 — invisible inside the old
+# combined agent-push blob, surfaced immediately once split into its own
+# CI step. Fixed 2026-08-24.
 agent-push-brave:
-	@echo "Pushing $(BROWSER_BRAVE_IMAGE):$(TAG) (brave browser)..."
-	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_BRAVE_IMAGE):$(TAG) -f agent/browser/Dockerfile.brave --push agent/browser/
+	@echo "Pushing $(BROWSER_BRAVE_IMAGE):$(TAG) (brave browser, amd64-only)..."
+	docker buildx build --platform linux/amd64 $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_BRAVE_IMAGE):$(TAG) -f agent/browser/Dockerfile.brave --push agent/browser/
 
 agent-push: agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave
 	@echo "Pushed all agent + browser images."
