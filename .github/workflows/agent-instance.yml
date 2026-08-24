@@ -5,6 +5,9 @@ name: Build and Push Agent Instance Image
 # 2026-08-24 so instance changes build/push without waiting on or
 # triggering the (much slower) browser image pipeline. See
 # agent-browser.yml for chromium/chrome/brave.
+#
+# Job layout (2026-08-24): build+test and arm64 cache warming run in
+# parallel, then push waits on both. Reasoning below (see warm-arm64 job).
 on:
   push:
     branches: [main]
@@ -16,7 +19,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  agent-instance:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,39 +31,83 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install test dependencies
+        run: make install-test
+
+      # FORK-ONLY: image name overridden to the shaunbarlow Docker Hub
+      # namespace (make command-line overrides beat the Makefile's `:=`
+      # assignments). Drop this commit before PRing upstream.
+      #
+      # --load only accepts a single-arch result, so this only ever
+      # builds linux/amd64 (the CI runner's native arch). That's fine for
+      # testing — see the warm-arm64 job below for why arm64 doesn't need
+      # to happen here too.
+      - name: Build agent instance image (local, amd64)
+        run: |
+          make agent-build-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+        env:
+          CACHE_ARGS: --cache-from type=gha,scope=agent-instance-amd64 --cache-to type=gha,mode=max,scope=agent-instance-amd64
+
+      # No browser containers are launched here, so the browser test
+      # suite skips itself and this only exercises openclaw/cron/qmd/
+      # env-var checks against the instance image.
+      - name: Run agent instance test suite
+        run: |
+          make agent-test-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+
+  # Warms the arm64 buildx cache in parallel with build-and-test, using
+  # `--output type=cacheonly` (builds every layer, pushes nothing,
+  # loads nothing). Why this exists: the final push step builds
+  # multi-arch (amd64+arm64) for real, but --load in build-and-test can
+  # only ever populate the amd64 cache. Without this job, push used to
+  # hit a stone-cold arm64 cache and pay for a full from-scratch
+  # QEMU-emulated arm64 build *serially after tests already passed*
+  # (~20 minutes on run #32732888922, see agent-instance.yml history).
+  # Running the arm64 build here instead means it happens concurrently
+  # with build-and-test rather than adding to the critical path, and by
+  # the time push runs, both arches hit warm GHA cache.
+  warm-arm64-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Warm arm64 build cache
+        run: |
+          make agent-warm-arm64-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+        env:
+          CACHE_ARGS: --cache-from type=gha,scope=agent-instance-arm64 --cache-to type=gha,mode=max,scope=agent-instance-arm64
+
+  push:
+    needs: [build-and-test, warm-arm64-cache]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Install test dependencies
-        run: make install-test
-
-      # FORK-ONLY: image names overridden to the shaunbarlow Docker Hub
-      # namespace (make command-line overrides beat the Makefile's `:=`
-      # assignments). Drop this commit before PRing upstream.
-      - name: Build agent instance image (local)
-        run: |
-          make agent-build-instance \
-            AGENT_IMAGE=shaunbarlow/openclaw
-        env:
-          CACHE_ARGS: --cache-from type=gha,scope=agent-instance --cache-to type=gha,mode=max,scope=agent-instance
-
-      # Instance-only test run — no browser containers are launched, so
-      # the browser test suite skips itself and this only exercises
-      # openclaw/cron/qmd/env-var checks against the instance image.
-      - name: Run agent instance test suite
-        run: |
-          make agent-test-instance \
-            AGENT_IMAGE=shaunbarlow/openclaw
-
+      # Multi-arch push. Reads from both the amd64 cache (populated by
+      # build-and-test) and the arm64 cache (populated by
+      # warm-arm64-cache), so this should be close to a pure
+      # cache-replay + push rather than a real rebuild of either arch.
       - name: Push agent instance image
         run: |
           make agent-push-instance \
             AGENT_IMAGE=shaunbarlow/openclaw
         env:
-          CACHE_ARGS: --cache-from type=gha,scope=agent-instance --cache-to type=gha,mode=max,scope=agent-instance
+          CACHE_ARGS: --cache-from type=gha,scope=agent-instance-amd64 --cache-from type=gha,scope=agent-instance-arm64 --cache-to type=gha,mode=max,scope=agent-instance-amd64 --cache-to type=gha,mode=max,scope=agent-instance-arm64
 
       # Stable image build path disabled 2026-08-24 at Shaun's request.
       # Builds from agent/instance/Dockerfile like the image above, so it

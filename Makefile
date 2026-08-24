@@ -29,6 +29,7 @@ HELM_NAMESPACE := claworc
 	agent-build-instance agent-build-chromium agent-build-chrome agent-build-brave \
 	agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave \
 	agent-test-instance agent-test-browser agent-ci-instance agent-ci-browser \
+	agent-warm-arm64-instance \
 	helm-install helm-upgrade helm-uninstall helm-template install-dev dev dev-docs \
 	pull-agent local-build local-up local-down local-logs local-clean control-plane \
 	ssh-integration-test ssh-file-integration-test test-integration-backend extract-models scrape-models test \
@@ -135,6 +136,20 @@ agent-push: agent-push-instance agent-push-chromium agent-push-chrome agent-push
 # anyone who wants the old "build everything" behavior locally.
 agent-ci-instance: agent-build-instance agent-test-instance agent-push-instance
 	@echo "Agent instance image built, tested, and pushed."
+
+# Warms the arm64 buildx cache without loading or pushing an image
+# (`--output type=cacheonly`). agent-build-instance only ever builds
+# linux/$(NATIVE_ARCH) (amd64 in CI) because --load can't accept a
+# multi-arch result, so the final multi-arch agent-push-instance used to
+# hit a completely cold arm64 cache and pay for a full from-scratch
+# QEMU-emulated build serially after tests had already passed. Run this
+# target in parallel with agent-build-instance/agent-test-instance (see
+# agent-instance.yml's warm-arm64 job) against the same CACHE_ARGS scope
+# so agent-push-instance's multi-arch build hits warm cache for both
+# arches.
+agent-warm-arm64-instance:
+	@echo "Warming arm64 build cache for $(AGENT_IMAGE)..."
+	docker buildx build --platform linux/arm64 $(CACHE_ARGS) -f agent/instance/Dockerfile --output type=cacheonly agent/instance/
 
 agent-ci-browser: agent-base agent-build-chromium agent-build-chrome agent-build-brave agent-test-browser agent-push-chromium agent-push-chrome agent-push-brave
 	@echo "Browser images built, tested, and pushed."
