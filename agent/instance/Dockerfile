@@ -100,17 +100,29 @@ RUN mkdir -p /opt/homebrew-skeleton && \
 # build, which is stable. searchMode "search" (BM25, no embeddings) was
 # unaffected either way. Re-evaluate if this fleet ever runs on bare metal
 # with genuine AVX512 support.
+# node-llama-cpp ships a SEPARATE libggml-base.so per backend flavor
+# (linux-x64, linux-x64-cuda, linux-x64-cuda-ext, linux-x64-vulkan,
+# linux-arm64, linux-armv7l), each with its own full set of ggml-cpu .so
+# variants. An earlier version of this step used `find ... | head -1`,
+# which only stripped ONE of those directories (whichever `find` happened
+# to return first) and left AVX512 variants intact in the others —
+# verified 2026-08-24 on a live agent instance: `find` returned the
+# linux-x64-vulkan dir first (correctly stripped), but this fleet has no
+# GPU so node-llama-cpp actually dlopen()s from linux-x64, which still had
+# all 7 AVX512 .so files and reproduced the original vsearch segfault.
+# Loop over every directory `find` reports instead of taking just the
+# first.
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
     BUN_INSTALL=/opt/bun bun add -g --trust @tobilu/qmd && \
     ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
-    NLC_BASE_SO="$(find /opt/bun/install/global/node_modules/@node-llama-cpp -name libggml-base.so | head -1)" && \
-    if [ -n "$NLC_BASE_SO" ]; then \
-      NLC_CPU_DIR="$(dirname "$NLC_BASE_SO")" && \
-      rm -fv "$NLC_CPU_DIR"/libggml-cpu-cannonlake.so "$NLC_CPU_DIR"/libggml-cpu-skylakex.so "$NLC_CPU_DIR"/libggml-cpu-cascadelake.so "$NLC_CPU_DIR"/libggml-cpu-cooperlake.so "$NLC_CPU_DIR"/libggml-cpu-icelake.so "$NLC_CPU_DIR"/libggml-cpu-sapphirerapids.so "$NLC_CPU_DIR"/libggml-cpu-zen4.so; \
-    else \
+    NLC_CPU_DIRS="$(find /opt/bun/install/global/node_modules/@node-llama-cpp -name libggml-base.so -exec dirname {} \; | sort -u)" && \
+    if [ -z "$NLC_CPU_DIRS" ]; then \
       echo "ERROR: could not locate @node-llama-cpp ggml-cpu binaries to strip AVX512 variants" >&2 && exit 1; \
     fi && \
+    echo "$NLC_CPU_DIRS" | while IFS= read -r NLC_CPU_DIR; do \
+      rm -fv "$NLC_CPU_DIR"/libggml-cpu-cannonlake.so "$NLC_CPU_DIR"/libggml-cpu-skylakex.so "$NLC_CPU_DIR"/libggml-cpu-cascadelake.so "$NLC_CPU_DIR"/libggml-cpu-cooperlake.so "$NLC_CPU_DIR"/libggml-cpu-icelake.so "$NLC_CPU_DIR"/libggml-cpu-sapphirerapids.so "$NLC_CPU_DIR"/libggml-cpu-zen4.so; \
+    done && \
     /usr/local/bin/qmd --version
 
 COPY browser.json /defaults/browser.json
