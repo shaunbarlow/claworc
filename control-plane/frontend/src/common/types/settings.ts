@@ -31,6 +31,8 @@ export interface Settings {
   default_ports: import("./instance").PortSpec[];
   /** Default OpenClaw memory backend for agents without an override. */
   default_memory_backend: "builtin" | "qmd";
+  /** Default web-search provider for agents without an override. "" = leave OpenClaw's own auto-detection alone. */
+  default_search_provider: "" | "brave";
   /** Global QMD memory defaults, merged under per-agent overrides. */
   default_memory_qmd: import("./instance").MemoryQmdSettings;
   /** "unset" until the user has answered the consent prompt; then "opt_in" or "opt_out". */
@@ -70,6 +72,7 @@ export interface SettingsUpdatePayload {
   default_ports?: import("./instance").PortSpec[];
   default_memory_backend?: "builtin" | "qmd";
   default_memory_qmd?: import("./instance").MemoryQmdSettings;
+  default_search_provider?: "" | "brave";
 }
 
 // Keep backward compat alias

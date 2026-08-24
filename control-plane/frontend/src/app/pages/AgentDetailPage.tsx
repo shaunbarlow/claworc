@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createElement } from "react";
 import { Link, useParams, useNavigate, useLocation } from "react-router-dom";
-import { AlertTriangle, Eye, X, Maximize, ExternalLink, Plus } from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, X, Maximize, ExternalLink, Plus } from "lucide-react";
 import { useAuth } from "@common/contexts/AuthContext";
 import { useTeam } from "@common/contexts/TeamContext";
 import StatusBadge from "@common/components/StatusBadge";
@@ -169,6 +169,11 @@ export default function AgentDetailPage() {
   // User-Agent override editing state
   const [editingUserAgent, setEditingUserAgent] = useState(false);
   const [pendingUserAgent, setPendingUserAgent] = useState<string | null>(null);
+
+  // Search-provider override editing state
+  const [editingBraveKey, setEditingBraveKey] = useState(false);
+  const [braveKeyValue, setBraveKeyValue] = useState("");
+  const [showBraveKey, setShowBraveKey] = useState(false);
 
   // Display name editing state
   const [editingDisplayName, setEditingDisplayName] = useState(false);
@@ -893,6 +898,96 @@ export default function AgentDetailPage() {
                     {instance.has_user_agent_override ? instance.user_agent : "Default"}
                     <button type="button" onClick={() => { setPendingUserAgent(instance.user_agent ?? ""); setEditingUserAgent(true); }} className="ml-2 text-xs text-blue-600 hover:text-blue-800">Edit</button>
                   </dd>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Web search provider card */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-sm font-medium text-gray-900 mb-1">Web Search</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              {`Search provider for this agent. "Inherit" follows the global default (currently ${settings?.default_search_provider === "brave" ? "Brave" : "Auto"}).`}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Provider</label>
+                <select
+                  value={instance.search_provider}
+                  onChange={(e) => {
+                    const v = e.target.value as "" | "brave";
+                    updateMutation.mutate({ id: instanceId, payload: { search_provider: v } });
+                  }}
+                  disabled={updateMutation.isPending}
+                  className="w-full max-w-xs px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Inherit global default</option>
+                  <option value="brave">Brave Search</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Brave API Key override</label>
+                {editingBraveKey ? (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1 max-w-xs">
+                      <input
+                        type={showBraveKey ? "text" : "password"}
+                        value={braveKeyValue}
+                        onChange={(e) => setBraveKeyValue(e.target.value)}
+                        className="w-full px-3 py-1.5 pr-10 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Leave empty to use global key"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowBraveKey(!showBraveKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {showBraveKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateMutation.mutate(
+                          { id: instanceId, payload: { brave_api_key: braveKeyValue } },
+                          { onSuccess: () => { setEditingBraveKey(false); setBraveKeyValue(""); } },
+                        );
+                      }}
+                      disabled={updateMutation.isPending}
+                      className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {updateMutation.isPending ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingBraveKey(false); setBraveKeyValue(""); }}
+                      className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500 font-mono">
+                      {instance.has_brave_override ? "****(set)" : "(inherits global key)"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingBraveKey(true)}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Change
+                    </button>
+                    {instance.has_brave_override && (
+                      <button
+                        type="button"
+                        onClick={() => updateMutation.mutate({ id: instanceId, payload: { brave_api_key: "" } })}
+                        className="text-xs text-red-600 hover:text-red-800"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

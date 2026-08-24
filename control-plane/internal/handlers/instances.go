@@ -110,6 +110,7 @@ type instanceCreateRequest struct {
 	StorageHomebrew    string                        `json:"storage_homebrew"`
 	StorageHome        string                        `json:"storage_home"`
 	BraveAPIKey        *string                       `json:"brave_api_key"`
+	SearchProvider     *string                       `json:"search_provider"` // "" = inherit; "brave" pins Brave
 	Models             *modelsConfig                 `json:"models"`
 	DefaultModel       string                        `json:"default_model"`
 	ContainerImage     *string                       `json:"container_image"`
@@ -157,6 +158,8 @@ type instanceResponse struct {
 	StorageHomebrew           string                    `json:"storage_homebrew"`
 	StorageHome               string                    `json:"storage_home"`
 	HasBraveOverride          bool                      `json:"has_brave_override"`
+	SearchProvider            string                    `json:"search_provider"` // "" = inherit
+	EffectiveSearchProvider   string                    `json:"effective_search_provider"`
 	Models                    *modelsResponse           `json:"models"`
 	DefaultModel              string                    `json:"default_model"`
 	ContainerImage            *string                   `json:"container_image"`
@@ -541,6 +544,8 @@ func instanceToResponse(inst database.Instance, status string) instanceResponse 
 		StorageHomebrew:           inst.StorageHomebrew,
 		StorageHome:               inst.StorageHome,
 		HasBraveOverride:          inst.BraveAPIKey != "",
+		SearchProvider:            inst.SearchProvider,
+		EffectiveSearchProvider:   effectiveSearchProvider(&inst),
 		Models:                    &modelsResponse{Effective: effective, DisabledDefaults: mc.Disabled, Extra: mc.Extra},
 		DefaultModel:              inst.DefaultModel,
 		ContainerImage:            containerImage,
@@ -779,6 +784,13 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 	if discordEnv := renderInitialDiscordEnv(inst); discordEnv != "" {
 		envVars["OPENCLAW_INITIAL_DISCORD"] = discordEnv
 	}
+	// Brave (or a future managed search provider) key rides the container
+	// environment the same way; the agent's OpenClaw config only ever holds a
+	// SecretRef pointing at BRAVE_API_KEY (see applySearchConfig), never the
+	// plaintext key.
+	for k, v := range buildSearchEnvVars(&inst) {
+		envVars[k] = v
+	}
 
 	placement := instancePlacementParams(inst)
 
@@ -1000,6 +1012,15 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var searchProvider string
+	if body.SearchProvider != nil {
+		if !isValidSearchProvider(*body.SearchProvider) {
+			writeError(w, http.StatusBadRequest, "search_provider must be \"\" or \"brave\"")
+			return
+		}
+		searchProvider = *body.SearchProvider
+	}
+
 	// Generate gateway token
 	gatewayTokenPlain := generateToken()
 	encGatewayToken, err := utils.Encrypt(gatewayTokenPlain)
@@ -1173,6 +1194,7 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 		StorageHomebrew:           body.StorageHomebrew,
 		StorageHome:               body.StorageHome,
 		BraveAPIKey:               encBraveKey,
+		SearchProvider:            searchProvider,
 		ContainerImage:            containerImage,
 		VNCResolution:             vncResolution,
 		Timezone:                  timezone,
@@ -1324,6 +1346,11 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			// shared-folder index paths) so first boot matches the resolved
 			// defaults + overrides.
 			applyMemoryConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, buildMemoryConfig(&inst))
+			// Seed the search-provider config (Brave plugin install + config, or
+			// nothing when no managed provider is selected) so first boot matches
+			// the resolved defaults + overrides. BRAVE_API_KEY itself already rode
+			// the container env via buildCreateParams above.
+			applySearchConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, &inst)
 
 			// Final catch for the provisioning window. Everything written to
 			// the row before the spec was built is already in the container
@@ -1411,6 +1438,7 @@ func GetInstance(w http.ResponseWriter, r *http.Request) {
 
 type instanceUpdateRequest struct {
 	BraveAPIKey               *string                    `json:"brave_api_key"`
+	SearchProvider            *string                    `json:"search_provider"` // "" clears the override; "brave" pins Brave
 	Models                    *modelsConfig              `json:"models"`
 	DefaultModel              *string                    `json:"default_model"`
 	Timezone                  *string                    `json:"timezone"`
@@ -1488,8 +1516,23 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 		inst.TeamID = newTeamID
 	}
 
+	// Update search provider selection
+	searchChanged := false
+	if body.SearchProvider != nil {
+		if !isValidSearchProvider(*body.SearchProvider) {
+			writeError(w, http.StatusBadRequest, "search_provider must be \"\" or \"brave\"")
+			return
+		}
+		if *body.SearchProvider != inst.SearchProvider {
+			searchChanged = true
+		}
+		database.DB.Model(&inst).Update("search_provider", *body.SearchProvider)
+		inst.SearchProvider = *body.SearchProvider
+	}
+
 	// Update Brave API key
 	if body.BraveAPIKey != nil {
+		searchChanged = true
 		if *body.BraveAPIKey != "" {
 			encrypted, err := utils.Encrypt(*body.BraveAPIKey)
 			if err != nil {
@@ -1497,8 +1540,22 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			database.DB.Model(&inst).Update("brave_api_key", encrypted)
+			inst.BraveAPIKey = encrypted
 		} else {
 			database.DB.Model(&inst).Update("brave_api_key", "")
+			inst.BraveAPIKey = ""
+		}
+	}
+	if searchChanged {
+		// Env var (BRAVE_API_KEY) only reaches the container on (re)create, so
+		// reconcile via the same drift-check restart path env-var edits use.
+		// The config push (plugins.entries.brave.*, tools.web.search.provider)
+		// is separate and hot-reloadable, so it goes over SSH without a restart
+		// unless a fresh plugin install forces one.
+		if EnsureEnvPropagated(r.Context(), inst, callerID(r), "BRAVE_API_KEY") {
+			log.Printf("instance %d: restarting to apply updated search provider env", inst.ID)
+		} else {
+			pushSearchConfig(inst.ID, inst.Name)
 		}
 	}
 
@@ -2305,6 +2362,7 @@ func CloneInstance(w http.ResponseWriter, r *http.Request) {
 		StorageHomebrew: src.StorageHomebrew,
 		StorageHome:     src.StorageHome,
 		BraveAPIKey:     src.BraveAPIKey,
+		SearchProvider:  src.SearchProvider,
 		ContainerImage:  src.ContainerImage,
 		VNCResolution:   src.VNCResolution,
 		Timezone:        src.Timezone,

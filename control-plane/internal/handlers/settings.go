@@ -35,6 +35,7 @@ var plainSettings = []string{
 	"default_user_agent",
 	"default_models",
 	"default_memory_backend",
+	"default_search_provider",
 	"analytics_consent",
 }
 
@@ -174,9 +175,14 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		database.SetSetting("default_models", string(b))
 	}
 
-	// Handle brave_api_key (fixed encrypted)
+	// Handle brave_api_key (fixed encrypted). Tracked separately from
+	// searchChanged below since changing the key matters even when the
+	// provider selection itself doesn't (e.g. rotating a key for an instance
+	// that already has "brave" pinned).
+	searchChanged := false
 	if v, ok := raw["brave_api_key"]; ok {
 		if strVal, ok := v.(string); ok {
+			searchChanged = true
 			if strVal != "" {
 				encrypted, err := utils.Encrypt(strVal)
 				if err != nil {
@@ -186,6 +192,22 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				database.SetSetting("brave_api_key", encrypted)
 			} else {
 				database.SetSetting("brave_api_key", "")
+			}
+		}
+	}
+
+	// Handle default search provider. Validated up front like
+	// default_memory_backend; "" means leave OpenClaw's own auto-detection
+	// alone, so it's a valid value here unlike default_memory_backend.
+	if v, ok := raw["default_search_provider"]; ok {
+		if strVal, ok := v.(string); ok {
+			if !isValidSearchProvider(strVal) {
+				writeError(w, http.StatusBadRequest, "default_search_provider must be \"\" or \"brave\"")
+				return
+			}
+			prev, _ := database.GetSetting("default_search_provider")
+			if strVal != prev {
+				searchChanged = true
 			}
 		}
 	}
@@ -347,6 +369,41 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			pushMemoryConfig(running[i].ID, running[i].Name)
+		}
+	}
+
+	// Reconcile every instance's search-provider setup when the global
+	// default provider or the global Brave key changed. Two independent
+	// concerns, same trigger:
+	//   - BRAVE_API_KEY only reaches a container on (re)create, so instances
+	//     that inherit the global key (no per-instance override) need the
+	//     same drift-check restart path as the generic env-var cascade above.
+	//   - tools.web.search.provider / plugins.entries.brave.config are
+	//     hot-reloadable, so a config push over SSH is enough — no restart
+	//     needed unless a fresh plugin install forces one (applySearchConfig
+	//     handles that itself).
+	// Checked against every instance (not just running ones) for the env
+	// part, matching the envVarsChanged cascade's reasoning; the config push
+	// stays scoped to running instances since a stopped agent has nothing to
+	// push to.
+	if searchChanged {
+		var instances []database.Instance
+		database.DB.Find(&instances)
+		for i := range instances {
+			if effectiveSearchProvider(&instances[i]) != "brave" {
+				continue
+			}
+			if EnsureEnvPropagated(r.Context(), instances[i], callerID(r), "BRAVE_API_KEY") {
+				restartingInstances = append(restartingInstances, restartTarget{
+					ID:          instances[i].ID,
+					Name:        instances[i].Name,
+					DisplayName: instances[i].DisplayName,
+				})
+				continue
+			}
+			if instances[i].Status == "running" && !database.IsLegacyEmbedded(instances[i].ContainerImage) {
+				pushSearchConfig(instances[i].ID, instances[i].Name)
+			}
 		}
 	}
 

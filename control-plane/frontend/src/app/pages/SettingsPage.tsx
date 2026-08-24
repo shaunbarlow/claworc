@@ -272,6 +272,8 @@ function ApiKeysTab({
     onError: (err) => errorToast("Sync failed", err),
   });
 
+  const updateSearchProviderMutation = useUpdateSettings();
+
   const openCreateModal = () => {
     setModalMode("create");
     setModalProvider(null);
@@ -403,8 +405,27 @@ function ApiKeysTab({
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-sm font-medium text-gray-900 mb-4">Brave API Key</h3>
-        <p className="text-xs text-gray-500 mb-3">Used for web search (not an LLM provider key).</p>
+        <h3 className="text-sm font-medium text-gray-900 mb-4">Web Search</h3>
+        <div className="mb-4">
+          <label className="block text-xs text-gray-500 mb-1">Default Provider</label>
+          <select
+            value={settings.default_search_provider}
+            onChange={(e) => {
+              const v = e.target.value as "" | "brave";
+              updateSearchProviderMutation.mutate({ default_search_provider: v });
+            }}
+            disabled={updateSearchProviderMutation.isPending}
+            className="w-full max-w-xs px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Auto (OpenClaw default)</option>
+            <option value="brave">Brave Search</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-400">
+            Applies to agents without a per-agent override. "Auto" leaves OpenClaw's own provider detection alone.
+          </p>
+        </div>
+        <h4 className="text-sm font-medium text-gray-900 mb-1">Brave API Key</h4>
+        <p className="text-xs text-gray-500 mb-3">Used when the Brave provider is selected above (or per-agent).</p>
         {editingBrave ? (
           <div className="flex gap-2">
             <div className="relative flex-1">

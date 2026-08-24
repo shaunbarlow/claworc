@@ -134,6 +134,8 @@ export default function AgentForm({
 
   // Brave key
   const [braveKey, setBraveKey] = useState("");
+  // Search provider override ("" = inherit the global default)
+  const [searchProvider, setSearchProvider] = useState<"" | "brave">("");
 
   // Per-instance env var overrides (plaintext, encrypted server-side on save)
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
@@ -183,6 +185,7 @@ export default function AgentForm({
       storage_homebrew: storageHomebrew,
       storage_home: storageHome,
       brave_api_key: braveKey || null,
+      search_provider: searchProvider || undefined,
       container_image: containerImage || null,
       vnc_resolution: vncResolution || null,
       timezone: timezone || null,
@@ -353,6 +356,17 @@ export default function AgentForm({
         {/* Brave key */}
         <div className="pt-4 mt-4 border-t border-gray-200">
           <label className="block text-xs text-gray-500 mb-1">
+            Web Search Provider
+          </label>
+          <select
+            value={searchProvider}
+            onChange={(e) => setSearchProvider(e.target.value as "" | "brave")}
+            className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Inherit global default</option>
+            <option value="brave">Brave Search</option>
+          </select>
+          <label className="block text-xs text-gray-500 mt-3 mb-1">
             Brave API Key (web search)
           </label>
           <input

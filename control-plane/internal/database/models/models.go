@@ -122,6 +122,12 @@ type Instance struct {
 	// MemoryQmd is a JSON MemoryQmdSettings override object merged on top of
 	// the global default_memory_qmd setting (field-wise; instance wins).
 	MemoryQmd string `gorm:"type:text;default:'{}'" json:"-"`
+	// SearchProvider overrides the global default_search_provider setting for
+	// this instance's OpenClaw web_search tool. "" = inherit the global
+	// default (which itself defaults to "", i.e. leave OpenClaw's own
+	// auto-detection alone); "brave" pins the Brave Search provider and wires
+	// up its API key. See internal/handlers/search.go.
+	SearchProvider string `gorm:"default:''" json:"search_provider"`
 	// SlackConfig holds the structured per-instance Slack connection settings
 	// (enabled flag, channel allowlist, DM policy) as JSON. It is rendered
 	// into the agent's OpenClaw `channels.slack` config block at boot via the

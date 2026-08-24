@@ -20,6 +20,10 @@ export interface Instance {
   storage_homebrew: string;
   storage_home: string;
   has_brave_override: boolean;
+  /** Per-instance search-provider override. "" = inherit the global default. */
+  search_provider: "" | "brave";
+  /** Resolved provider actually applied (instance override, else global default, else ""). */
+  effective_search_provider: "" | "brave";
   models: InstanceModels;
   default_model: string;
   container_image: string | null;
@@ -84,6 +88,7 @@ export interface InstanceCreatePayload {
   storage_homebrew?: string;
   storage_home?: string;
   brave_api_key?: string | null;
+  search_provider?: "" | "brave";
   models?: { disabled: string[]; extra: string[] };
   default_model?: string;
   container_image?: string | null;
@@ -118,6 +123,7 @@ export interface Toleration {
 
 export interface InstanceUpdatePayload {
   brave_api_key?: string;
+  search_provider?: "" | "brave";
   models?: { disabled: string[]; extra: string[] };
   default_model?: string;
   timezone?: string;
