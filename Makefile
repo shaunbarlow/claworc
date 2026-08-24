@@ -26,6 +26,8 @@ HELM_RELEASE := claworc
 HELM_NAMESPACE := claworc
 
 .PHONY: agent agent-ci agent-base agent-base-china agent-build agent-test agent-push agent-exec agent-stable agent-stable-ci dashboard docker-prune release \
+	agent-build-instance agent-build-chromium agent-build-chrome agent-build-brave \
+	agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave \
 	helm-install helm-upgrade helm-uninstall helm-template install-dev dev dev-docs \
 	pull-agent local-build local-up local-down local-logs local-clean control-plane \
 	ssh-integration-test ssh-file-integration-test test-integration-backend extract-models scrape-models test \
@@ -49,12 +51,27 @@ agent-base-china:
 	@echo "Building and pushing browser-base image (China mirrors)..."
 	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg USE_CHINA_MIRRORS=true -t $(BROWSER_BASE_IMAGE):$(TAG) -f agent/browser/Dockerfile.base --push agent/browser/
 
-agent-build:
-	@echo "Building images locally (agent + browser variants)..."
+# Granular per-image local build targets (--load). Split out so CI (and
+# anyone running these by hand) gets one clearly-attributable step per
+# image instead of one opaque "agent-build" blob.
+agent-build-instance:
+	@echo "Building $(AGENT_IMAGE):$(TAG) (instance)..."
 	docker buildx build --platform linux/$(NATIVE_ARCH) $(CACHE_ARGS) -t $(AGENT_IMAGE):$(TAG) -f agent/instance/Dockerfile --load agent/instance/
+
+agent-build-chromium:
+	@echo "Building $(BROWSER_CHROMIUM_IMAGE):$(TAG) (chromium browser)..."
 	docker buildx build --platform linux/$(NATIVE_ARCH) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROMIUM_IMAGE):$(TAG) -f agent/browser/Dockerfile.chromium --load agent/browser/
+
+agent-build-chrome:
+	@echo "Building $(BROWSER_CHROME_IMAGE):$(TAG) (chrome browser)..."
 	docker buildx build --platform linux/amd64 $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROME_IMAGE):$(TAG) -f agent/browser/Dockerfile.chrome --load agent/browser/
+
+agent-build-brave:
+	@echo "Building $(BROWSER_BRAVE_IMAGE):$(TAG) (brave browser)..."
 	docker buildx build --platform linux/$(NATIVE_ARCH) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_BRAVE_IMAGE):$(TAG) -f agent/browser/Dockerfile.brave --load agent/browser/
+
+agent-build: agent-build-instance agent-build-chromium agent-build-chrome agent-build-brave
+	@echo "Building images locally (agent + browser variants)..."
 
 agent-test:
 	cd agent/tests && AGENT_INSTANCE_TEST_IMAGE=$(AGENT_IMAGE):$(TAG) \
@@ -64,13 +81,28 @@ agent-test:
 		npm run test
 
 
-agent-push:
-	@echo "Pushing all agent + browser images in parallel..."
-	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) -t $(AGENT_IMAGE):$(TAG) -f agent/instance/Dockerfile --push agent/instance/ & \
-	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROMIUM_IMAGE):$(TAG) -f agent/browser/Dockerfile.chromium --push agent/browser/ & \
-	docker buildx build --platform linux/amd64 $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROME_IMAGE):$(TAG) -f agent/browser/Dockerfile.chrome --push agent/browser/ & \
-	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_BRAVE_IMAGE):$(TAG) -f agent/browser/Dockerfile.brave --push agent/browser/ & \
-	wait
+# Granular per-image push targets. Each is a standalone multi-arch
+# buildx --push (re-runs the build under the hood, using the CI layer
+# cache) so a CI log shows one step per image instead of one parallel
+# blob where a single failure is hard to attribute.
+agent-push-instance:
+	@echo "Pushing $(AGENT_IMAGE):$(TAG) (instance)..."
+	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) -t $(AGENT_IMAGE):$(TAG) -f agent/instance/Dockerfile --push agent/instance/
+
+agent-push-chromium:
+	@echo "Pushing $(BROWSER_CHROMIUM_IMAGE):$(TAG) (chromium browser)..."
+	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROMIUM_IMAGE):$(TAG) -f agent/browser/Dockerfile.chromium --push agent/browser/
+
+agent-push-chrome:
+	@echo "Pushing $(BROWSER_CHROME_IMAGE):$(TAG) (chrome browser)..."
+	docker buildx build --platform linux/amd64 $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_CHROME_IMAGE):$(TAG) -f agent/browser/Dockerfile.chrome --push agent/browser/
+
+agent-push-brave:
+	@echo "Pushing $(BROWSER_BRAVE_IMAGE):$(TAG) (brave browser)..."
+	docker buildx build --platform $(PLATFORMS) $(CACHE_ARGS) --build-arg BASE_IMAGE=$(BROWSER_BASE_IMAGE):$(TAG) -t $(BROWSER_BRAVE_IMAGE):$(TAG) -f agent/browser/Dockerfile.brave --push agent/browser/
+
+agent-push: agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave
+	@echo "Pushed all agent + browser images."
 
 # Nightly stable agent image: same Dockerfile as claworc/openclaw, but pins
 # OpenClaw to the version blessed by isitstable.com. Resolved at build time so
