@@ -1,7 +1,8 @@
 # Claworc - secure and easy-to-use orchestrator for OpenClaw
 
 [![Control Plane](https://github.com/gluk-w/claworc/actions/workflows/control-plane.yml/badge.svg?branch=main)](https://github.com/gluk-w/claworc/actions/workflows/control-plane.yml)                                                                                                                                                           
-[![Agent](https://github.com/gluk-w/claworc/actions/workflows/agent.yml/badge.svg?branch=main)](https://github.com/gluk-w/claworc/actions/workflows/agent.yml)               
+[![Agent Instance](https://github.com/gluk-w/claworc/actions/workflows/agent-instance.yml/badge.svg?branch=main)](https://github.com/gluk-w/claworc/actions/workflows/agent-instance.yml)
+[![Agent Browser](https://github.com/gluk-w/claworc/actions/workflows/agent-browser.yml/badge.svg?branch=main)](https://github.com/gluk-w/claworc/actions/workflows/agent-browser.yml)               
 [![CodeQL](https://github.com/gluk-w/claworc/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/gluk-w/claworc/actions/workflows/codeql.yml)     
 
 Claworc makes it safe and simple to run multiple [OpenClaw](https://openclaw.ai) instances across your organization

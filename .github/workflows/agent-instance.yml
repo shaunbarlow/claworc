@@ -1,0 +1,75 @@
+name: Build and Push Agent Instance Image
+
+# Fast iteration path: just the OpenClaw instance image (openclaw + sshd +
+# cron, no browser). Split out from the old combined agent.yml on
+# 2026-08-24 so instance changes build/push without waiting on or
+# triggering the (much slower) browser image pipeline. See
+# agent-browser.yml for chromium/chrome/brave.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent/instance/**'
+      - 'agent/tests/**'
+      - 'Makefile'
+      - '.github/workflows/agent-instance.yml'
+  workflow_dispatch:
+
+jobs:
+  agent-instance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Install test dependencies
+        run: make install-test
+
+      # FORK-ONLY: image names overridden to the shaunbarlow Docker Hub
+      # namespace (make command-line overrides beat the Makefile's `:=`
+      # assignments). Drop this commit before PRing upstream.
+      - name: Build agent instance image (local)
+        run: |
+          make agent-build-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+        env:
+          CACHE_ARGS: --cache-from type=gha,scope=agent-instance --cache-to type=gha,mode=max,scope=agent-instance
+
+      # Instance-only test run — no browser containers are launched, so
+      # the browser test suite skips itself and this only exercises
+      # openclaw/cron/qmd/env-var checks against the instance image.
+      - name: Run agent instance test suite
+        run: |
+          make agent-test-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+
+      - name: Push agent instance image
+        run: |
+          make agent-push-instance \
+            AGENT_IMAGE=shaunbarlow/openclaw
+        env:
+          CACHE_ARGS: --cache-from type=gha,scope=agent-instance --cache-to type=gha,mode=max,scope=agent-instance
+
+      # Stable image build path disabled 2026-08-24 at Shaun's request.
+      # Builds from agent/instance/Dockerfile like the image above, so it
+      # lives here rather than in agent-browser.yml. Re-enable by
+      # uncommenting once we're ready to resume nightly stable builds.
+      # - name: Build, test, and push stable agent image
+      #   run: |
+      #     make agent-stable-ci \
+      #       STABLE_IMAGE=shaunbarlow/claworc-stable \
+      #       STABLE_MIRROR_IMAGE=shaunbarlow/openclaw-stable
+      #   env:
+      #     CACHE_ARGS: --cache-from type=gha,scope=agent-stable --cache-to type=gha,mode=max,scope=agent-stable

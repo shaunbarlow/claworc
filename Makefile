@@ -28,6 +28,7 @@ HELM_NAMESPACE := claworc
 .PHONY: agent agent-ci agent-base agent-base-china agent-build agent-test agent-push agent-exec agent-stable agent-stable-ci dashboard docker-prune release \
 	agent-build-instance agent-build-chromium agent-build-chrome agent-build-brave \
 	agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave \
+	agent-test-instance agent-test-browser agent-ci-instance agent-ci-browser \
 	helm-install helm-upgrade helm-uninstall helm-template install-dev dev dev-docs \
 	pull-agent local-build local-up local-down local-logs local-clean control-plane \
 	ssh-integration-test ssh-file-integration-test test-integration-backend extract-models scrape-models test \
@@ -80,6 +81,25 @@ agent-test:
 		AGENT_BRAVE_TEST_IMAGE=$(BROWSER_BRAVE_IMAGE):$(TAG) \
 		npm run test
 
+# Instance-only test run: only AGENT_INSTANCE_TEST_IMAGE is set, so
+# global-setup.ts only launches the instance container. Browser-suite
+# describe blocks see no matching container and skip themselves (see
+# browser.test.ts / helpers.ts). Used by the fast agent-instance pipeline
+# so it never needs a browser image to exist.
+agent-test-instance:
+	cd agent/tests && AGENT_INSTANCE_TEST_IMAGE=$(AGENT_IMAGE):$(TAG) npm run test
+
+# Browser-only test run: only the three browser vars are set, so
+# global-setup.ts launches no instance container. openclaw/cron/qmd/env-var
+# suites that key off containers.agent see no container and skip
+# themselves; only browser.test.ts actually runs. Used by the separate,
+# manually-triggered agent-browser pipeline.
+agent-test-browser:
+	cd agent/tests && AGENT_TEST_IMAGE=$(BROWSER_CHROMIUM_IMAGE):$(TAG) \
+		AGENT_CHROME_TEST_IMAGE=$(BROWSER_CHROME_IMAGE):$(TAG) \
+		AGENT_BRAVE_TEST_IMAGE=$(BROWSER_BRAVE_IMAGE):$(TAG) \
+		npm run test
+
 
 # Granular per-image push targets. Each is a standalone multi-arch
 # buildx --push (re-runs the build under the hood, using the CI layer
@@ -103,6 +123,15 @@ agent-push-brave:
 
 agent-push: agent-push-instance agent-push-chromium agent-push-chrome agent-push-brave
 	@echo "Pushed all agent + browser images."
+
+# Split CI entry points backing the two separate GitHub Actions pipelines
+# (agent-instance.yml, agent-browser.yml). agent-ci above still exists for
+# anyone who wants the old "build everything" behavior locally.
+agent-ci-instance: agent-build-instance agent-test-instance agent-push-instance
+	@echo "Agent instance image built, tested, and pushed."
+
+agent-ci-browser: agent-base agent-build-chromium agent-build-chrome agent-build-brave agent-test-browser agent-push-chromium agent-push-chrome agent-push-brave
+	@echo "Browser images built, tested, and pushed."
 
 # Nightly stable agent image: same Dockerfile as claworc/openclaw, but pins
 # OpenClaw to the version blessed by isitstable.com. Resolved at build time so
