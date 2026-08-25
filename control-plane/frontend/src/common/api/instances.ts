@@ -72,6 +72,21 @@ export async function updateInstanceMemory(
   return data;
 }
 
+export async function fetchInstanceContextEngine(
+  id: number,
+): Promise<import("@common/types/instance").InstanceContextEngine> {
+  const { data } = await client.get(`/instances/${id}/context-engine`);
+  return data;
+}
+
+export async function updateInstanceContextEngine(
+  id: number,
+  payload: import("@common/types/instance").InstanceContextEngineUpdatePayload,
+): Promise<import("@common/types/instance").InstanceContextEngine> {
+  const { data } = await client.patch(`/instances/${id}/context-engine`, payload);
+  return data;
+}
+
 export async function deleteInstance(id: number): Promise<void> {
   await client.delete(`/instances/${id}`);
 }

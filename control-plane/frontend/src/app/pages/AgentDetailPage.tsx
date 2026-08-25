@@ -41,9 +41,16 @@ import {
 import { useProviders } from "@common/hooks/useProviders";
 import { useSettings } from "@common/hooks/useSettings";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { setInstanceBrowserEnabled, fetchInstanceMemory, updateInstanceMemory } from "@common/api/instances";
-import type { InstanceMemoryUpdatePayload } from "@common/types/instance";
+import {
+  setInstanceBrowserEnabled,
+  fetchInstanceMemory,
+  updateInstanceMemory,
+  fetchInstanceContextEngine,
+  updateInstanceContextEngine,
+} from "@common/api/instances";
+import type { InstanceMemoryUpdatePayload, InstanceContextEngineUpdatePayload } from "@common/types/instance";
 import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
+import ContextEngineSettingsEditor from "@common/components/ContextEngineSettingsEditor";
 import { fetchCatalogProviderDetail } from "@common/api/llm";
 import type { CatalogProviderDetail } from "@common/api/llm";
 import ProviderIcon from "@common/components/ProviderIcon";
@@ -284,6 +291,21 @@ export default function AgentDetailPage() {
       successToast("Memory settings saved", "The agent's OpenClaw gateway is restarting to apply them.");
     },
     onError: (err: unknown) => errorToast("Failed to save memory settings", err),
+  });
+
+  // Context engine (legacy/lossless-claw) — fetched lazily on the settings tab.
+  const { data: instanceContextEngine } = useQuery({
+    queryKey: ["instances", instanceId, "context-engine"],
+    queryFn: () => fetchInstanceContextEngine(instanceId),
+    enabled: activeTab === "settings" && instance?.is_legacy_embedded === false,
+  });
+  const contextEngineMutation = useMutation({
+    mutationFn: (payload: InstanceContextEngineUpdatePayload) => updateInstanceContextEngine(instanceId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instances", instanceId, "context-engine"] });
+      successToast("Context engine settings saved", "Most changes apply live; installing a new plugin restarts the gateway.");
+    },
+    onError: (err: unknown) => errorToast("Failed to save context engine settings", err),
   });
 
   if (isLoading) {
@@ -1014,6 +1036,29 @@ export default function AgentDetailPage() {
                 await memoryMutation.mutateAsync({ memory_backend: backend, qmd });
               }}
               isSaving={memoryMutation.isPending}
+            />
+          )}
+
+          {/* Context engine card (legacy/lossless-claw) — non-legacy agents only */}
+          {!instance.is_legacy_embedded && instanceContextEngine && (
+            <ContextEngineSettingsEditor
+              key={`ctxeng-${JSON.stringify(instanceContextEngine.context_engine)}-${JSON.stringify(instanceContextEngine.lossless_claw)}`}
+              title="Context Engine"
+              description={`OpenClaw context engine (plugins.slots.contextEngine) for this agent. "Inherit" follows the global default (currently ${instanceContextEngine.default_engine === "lossless-claw" ? "Lossless Context Management" : "Legacy"}). Unset lossless-claw fields inherit the global defaults.`}
+              engine={instanceContextEngine.context_engine}
+              engineOptions={[
+                { value: "", label: `Inherit (${instanceContextEngine.default_engine === "lossless-claw" ? "Lossless Context Management" : "Legacy"})` },
+                { value: "legacy", label: "Legacy (OpenClaw default)" },
+                { value: "lossless-claw", label: "Lossless Context Management" },
+              ]}
+              losslessClaw={instanceContextEngine.lossless_claw}
+              effectiveLosslessClaw={instanceContextEngine.effective_lossless_claw}
+              inheritEngine={instanceContextEngine.default_engine}
+              footnote="Config changes apply live; selecting lossless-claw for the first time installs the plugin and restarts the gateway."
+              onSave={async (contextEngine, losslessClaw) => {
+                await contextEngineMutation.mutateAsync({ context_engine: contextEngine, lossless_claw: losslessClaw });
+              }}
+              isSaving={contextEngineMutation.isPending}
             />
           )}
 

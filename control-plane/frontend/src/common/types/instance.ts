@@ -258,3 +258,60 @@ export interface InstanceMemoryUpdatePayload {
   /** Full replacement of the per-instance override object. */
   qmd?: MemoryQmdSettings;
 }
+
+/** One lossless-claw fallbackProviders entry: an alternate provider/model
+ * pair tried if the primary summary call fails. */
+export interface LosslessClawFallbackProvider {
+  provider: string;
+  model: string;
+}
+
+/** Curated lossless-claw context-engine settings managed by Claworc.
+ * Unset fields inherit: instance override -> global default -> plugin default.
+ * See internal/handlers/contextengine.go's LosslessClawSettings for the
+ * authoritative field list, sourced from `openclaw plugins inspect
+ * lossless-claw --json`'s configJsonSchema/configUiHints. */
+export interface LosslessClawSettings {
+  /** Fraction of the context window (0-1) that triggers compaction. */
+  context_threshold?: number;
+  /** Number of recent messages protected from compaction. */
+  fresh_tail_count?: number;
+  /** Max source tokens per leaf compaction chunk before summarization. */
+  leaf_chunk_tokens?: number;
+  /** Preferred max condensation source depth during sweeps (0 = leaf only, -1 = unlimited). */
+  sweep_max_depth?: number;
+  host_fallback_mode?: "error" | "capture-only";
+  /** Keep older context by prompt relevance instead of pure chronology under budget pressure. */
+  prompt_aware_eviction?: boolean;
+  /** Replace evicted large tool-result rows with an [LCM Tool Output: file_xxx] reference. */
+  stub_large_tool_payloads?: boolean;
+  /** Free-text guidance appended to the plugin's own compaction/recall behavior. */
+  custom_instructions?: string;
+  /** Model lossless-claw uses for its own summarization calls. Setting this
+   * (or summary_provider) also grants plugins.entries.lossless-claw.llm.allowModelOverride. */
+  summary_model?: string;
+  summary_provider?: string;
+  /** Alternate provider/model pairs tried if the primary summary call fails. */
+  fallback_providers?: LosslessClawFallbackProvider[];
+  /** Raw JSON object deep-merged into plugins.entries.lossless-claw.config for
+   * anything not modeled above (contextThresholdOverrides, cacheAwareCompaction,
+   * dynamicLeafChunkTokens, autoRotateSessionFiles, independentLogFile, ...). */
+  advanced?: Record<string, unknown>;
+}
+
+/** GET/PATCH /instances/{id}/context-engine payload. */
+export interface InstanceContextEngine {
+  /** Per-instance override; "" = inherit the global default. */
+  context_engine: "" | "legacy" | "lossless-claw";
+  effective_engine: "legacy" | "lossless-claw";
+  default_engine: "legacy" | "lossless-claw";
+  lossless_claw: LosslessClawSettings;
+  effective_lossless_claw: LosslessClawSettings;
+  restarts_gateway_on_apply: boolean;
+}
+
+export interface InstanceContextEngineUpdatePayload {
+  context_engine?: "" | "legacy" | "lossless-claw";
+  /** Full replacement of the per-instance override object. */
+  lossless_claw?: LosslessClawSettings;
+}

@@ -35,6 +35,10 @@ export interface Settings {
   default_search_provider: "" | "brave";
   /** Global QMD memory defaults, merged under per-agent overrides. */
   default_memory_qmd: import("./instance").MemoryQmdSettings;
+  /** Default OpenClaw context engine for agents without an override. "" resolves to "legacy". */
+  default_context_engine: "" | "legacy" | "lossless-claw";
+  /** Global lossless-claw settings defaults, merged under per-agent overrides. */
+  default_context_engine_settings: import("./instance").LosslessClawSettings;
   /** "unset" until the user has answered the consent prompt; then "opt_in" or "opt_out". */
   analytics_consent: "unset" | "opt_in" | "opt_out";
   /** Random 32-char hex ID reported alongside anonymous events. Read-only. */
@@ -73,6 +77,8 @@ export interface SettingsUpdatePayload {
   default_memory_backend?: "builtin" | "qmd";
   default_memory_qmd?: import("./instance").MemoryQmdSettings;
   default_search_provider?: "" | "brave";
+  default_context_engine?: "" | "legacy" | "lossless-claw";
+  default_context_engine_settings?: import("./instance").LosslessClawSettings;
 }
 
 // Keep backward compat alias

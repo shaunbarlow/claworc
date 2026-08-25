@@ -445,6 +445,10 @@ func main() {
 			r.Get("/instances/{id}/memory", handlers.GetInstanceMemory)
 			r.Patch("/instances/{id}/memory", handlers.SetInstanceMemory)
 
+			// Context engine (legacy/lossless-claw) configuration.
+			r.Get("/instances/{id}/context-engine", handlers.GetInstanceContextEngine)
+			r.Patch("/instances/{id}/context-engine", handlers.SetInstanceContextEngine)
+
 			// Kanban
 			r.Get("/kanban/boards", handlers.ListKanbanBoards)
 			r.Post("/kanban/boards", handlers.CreateKanbanBoard)

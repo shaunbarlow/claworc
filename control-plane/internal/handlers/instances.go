@@ -2390,6 +2390,10 @@ func CloneInstance(w http.ResponseWriter, r *http.Request) {
 		// same way the original does.
 		MemoryBackend: src.MemoryBackend,
 		MemoryQmd:     src.MemoryQmd,
+		// Carry over the context-engine override so the clone assembles/compacts
+		// context the same way the original does.
+		ContextEngine:         src.ContextEngine,
+		ContextEngineSettings: src.ContextEngineSettings,
 		// Carry over placement/service config so the clone schedules and is
 		// reachable the same way the original is.
 		PodAnnotations:            src.PodAnnotations,

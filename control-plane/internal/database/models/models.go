@@ -128,6 +128,17 @@ type Instance struct {
 	// auto-detection alone); "brave" pins the Brave Search provider and wires
 	// up its API key. See internal/handlers/search.go.
 	SearchProvider string `gorm:"default:''" json:"search_provider"`
+	// ContextEngine overrides the global default_context_engine setting for
+	// this instance's OpenClaw plugins.slots.contextEngine selection. "" =
+	// inherit the global default (which itself defaults to "legacy");
+	// otherwise "legacy" or "lossless-claw". See
+	// internal/handlers/contextengine.go.
+	ContextEngine string `gorm:"default:''" json:"context_engine"`
+	// ContextEngineSettings is a JSON LosslessClawSettings override object
+	// merged on top of the global default_context_engine_settings setting
+	// (field-wise; instance wins). Only meaningful when the effective context
+	// engine is "lossless-claw".
+	ContextEngineSettings string `gorm:"type:text;default:'{}'" json:"-"`
 	// SlackConfig holds the structured per-instance Slack connection settings
 	// (enabled flag, channel allowlist, DM policy) as JSON. It is rendered
 	// into the agent's OpenClaw `channels.slack` config block at boot via the

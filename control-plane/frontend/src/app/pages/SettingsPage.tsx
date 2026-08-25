@@ -18,6 +18,7 @@ import TolerationsEditor from "@common/components/TolerationsEditor";
 import AffinityEditor from "@common/components/AffinityEditor";
 import PortsEditor from "@common/components/PortsEditor";
 import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
+import ContextEngineSettingsEditor from "@common/components/ContextEngineSettingsEditor";
 import { useHealth } from "@common/hooks/useHealth";
 import StickyActionBar from "@common/components/StickyActionBar";
 import Page from "@common/components/Page";
@@ -541,6 +542,15 @@ function EnvironmentTab({
       default_memory_qmd: qmd,
     });
   };
+  const handleSaveContextEngineDefaults = async (
+    engine: "" | "legacy" | "lossless-claw",
+    losslessClaw: import("@common/types/instance").LosslessClawSettings,
+  ) => {
+    await placementMutation.mutateAsync({
+      default_context_engine: engine === "" ? "legacy" : engine,
+      default_context_engine_settings: losslessClaw,
+    });
+  };
 
   const resourceFields: {
     key: string;
@@ -682,6 +692,21 @@ function EnvironmentTab({
         qmd={settings.default_memory_qmd ?? {}}
         footnote="Saving restarts the openclaw-gateway service on every running agent."
         onSave={handleSaveMemoryDefaults}
+        isSaving={placementMutation.isPending}
+      />
+
+      <ContextEngineSettingsEditor
+        key={`ctxeng-${JSON.stringify(settings.default_context_engine)}-${JSON.stringify(settings.default_context_engine_settings)}`}
+        title="Context Engine Defaults"
+        description="OpenClaw context engine (plugins.slots.contextEngine) for agents without a per-agent override. Legacy is OpenClaw's built-in engine; Lossless Context Management is a plugin engine with DAG-based summarization and lossless recall."
+        engine={settings.default_context_engine === "lossless-claw" ? "lossless-claw" : "legacy"}
+        engineOptions={[
+          { value: "legacy", label: "Legacy (OpenClaw default)" },
+          { value: "lossless-claw", label: "Lossless Context Management" },
+        ]}
+        losslessClaw={settings.default_context_engine_settings ?? {}}
+        footnote="Config changes apply live to every running agent; selecting lossless-claw for an agent that doesn't have it yet installs the plugin and restarts that agent's gateway."
+        onSave={handleSaveContextEngineDefaults}
         isSaving={placementMutation.isPending}
       />
 

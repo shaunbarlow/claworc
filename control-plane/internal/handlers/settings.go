@@ -36,6 +36,7 @@ var plainSettings = []string{
 	"default_models",
 	"default_memory_backend",
 	"default_search_provider",
+	"default_context_engine",
 	"analytics_consent",
 }
 
@@ -123,6 +124,9 @@ func settingsToResponse(raw map[string]string) map[string]interface{} {
 
 	// Global QMD memory defaults (JSON MemoryQmdSettings object).
 	result["default_memory_qmd"] = loadMemoryQmdSettings(raw["default_memory_qmd"])
+
+	// Global lossless-claw context-engine defaults (JSON LosslessClawSettings object).
+	result["default_context_engine_settings"] = loadLosslessClawSettings(raw["default_context_engine_settings"])
 
 	return result
 }
@@ -240,6 +244,41 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				"total_env_vars": len(decodeEncryptedEnvVarsJSON(updated)),
 			})
 		}
+	}
+
+	// Handle default context engine. Validated up front like
+	// default_memory_backend; "" is accepted and resolves to "legacy"
+	// downstream (see effectiveContextEngine), matching default_search_provider's
+	// "empty means leave it alone" treatment more than default_memory_backend's
+	// required-non-empty rule.
+	contextEngineChanged := false
+	if v, ok := raw["default_context_engine"]; ok {
+		if strVal, ok := v.(string); ok {
+			if !isValidContextEngine(strVal) {
+				writeError(w, http.StatusBadRequest, "default_context_engine must be \"\", \"legacy\" or \"lossless-claw\"")
+				return
+			}
+			prev, _ := database.GetSetting("default_context_engine")
+			if strVal != prev {
+				contextEngineChanged = true
+			}
+		}
+	}
+	if v, ok := raw["default_context_engine_settings"]; ok {
+		b, err := json.Marshal(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_context_engine_settings")
+			return
+		}
+		if _, err := parseLosslessClawSettings(b); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_context_engine_settings: "+err.Error())
+			return
+		}
+		prev, _ := database.GetSetting("default_context_engine_settings")
+		if string(b) != prev {
+			contextEngineChanged = true
+		}
+		database.SetSetting("default_context_engine_settings", string(b))
 	}
 
 	// Handle memory backend defaults. Track whether either key actually
@@ -414,6 +453,14 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				pushSearchConfig(instances[i].ID, instances[i].Name)
 			}
 		}
+	}
+
+	// Reconcile every running instance's OpenClaw context-engine config when
+	// the global defaults changed. Hot-reloadable (see applyContextEngineConfig),
+	// so — unlike the memory/search cascades above — this never needs the
+	// env-var drift-restart path, only a config push.
+	if contextEngineChanged {
+		pushContextEngineConfigForRunningInstances()
 	}
 
 	resp := settingsToResponse(getAllSettings())
