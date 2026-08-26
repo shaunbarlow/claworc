@@ -99,6 +99,13 @@ type PortSpec struct {
 	ServicePort int `json:"service_port,omitempty"`
 	// Protocol defaults to "TCP" if empty.
 	Protocol string `json:"protocol,omitempty"`
+	// Publish requests a host-reachable binding for this port on the Docker
+	// backend (127.0.0.1:<random>), the same treatment SSH's fixed port 22
+	// always gets. Ports left unpublished (the common CDP/VNC/agent case)
+	// stay loopback-only inside the container/pod and are reached only via
+	// the claworc bridge network or an SSH tunnel. K8s ignores this field --
+	// every WorkloadSpec port is already published via a ClusterIP Service.
+	Publish bool `json:"-"`
 }
 
 // ProbeSpec carries optional health probes. nil sub-fields disable that probe.

@@ -43,6 +43,14 @@ export interface Settings {
   analytics_consent: "unset" | "opt_in" | "opt_out";
   /** Random 32-char hex ID reported alongside anonymous events. Read-only. */
   installation_id: string;
+  /** Whether Claworc manages a shared OpenConnector (OOMOL Connect) deployment for agents. */
+  connector_enabled: boolean | string;
+  /** OpenConnector image reference, e.g. "ghcr.io/shaunbarlow/open-connector:tip". */
+  connector_image: string;
+  /** Requested storage capacity for the connector's data volume, e.g. "10Gi". */
+  connector_storage: string;
+  /** Optional OOMOL_CONNECT_ORIGIN override for OAuth redirect URLs. */
+  connector_origin: string;
   /**
    * Only populated on the PUT response when env vars changed: the set of
    * running instances the backend kicked a restart on to apply the change.
@@ -79,6 +87,10 @@ export interface SettingsUpdatePayload {
   default_search_provider?: "" | "brave";
   default_context_engine?: "" | "legacy" | "lossless-claw";
   default_context_engine_settings?: import("./instance").LosslessClawSettings;
+  connector_enabled?: boolean | string;
+  connector_image?: string;
+  connector_storage?: string;
+  connector_origin?: string;
 }
 
 // Keep backward compat alias

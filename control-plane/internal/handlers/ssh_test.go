@@ -234,6 +234,9 @@ func (m *mockOrchestrator) EnsureSSHAccess(_ context.Context, _, _ string) error
 func (m *mockOrchestrator) WorkloadSSHAddress(_ context.Context, _ string) (string, int, error) {
 	return "", 0, nil
 }
+func (m *mockOrchestrator) WorkloadAddress(_ context.Context, _ string, _ int) (string, int, error) {
+	return "", 0, nil
+}
 func (m *mockOrchestrator) SelfUpdate(_ context.Context, _ string) (bool, error) { return false, nil }
 
 // --- test helpers ---

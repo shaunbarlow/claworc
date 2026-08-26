@@ -120,6 +120,36 @@ func (d *DockerOrchestrator) WorkloadSSHAddress(ctx context.Context, name string
 	return "", 0, fmt.Errorf("cannot determine SSH address for %s", name)
 }
 
+// WorkloadAddress resolves the (host, port) to dial containerPort on the
+// named workload. Mirrors WorkloadSSHAddress's heuristic for an arbitrary
+// published port rather than the fixed SSH port 22 -- used by workloads that
+// expose a plain TCP/HTTP service directly (e.g. connectorprov) instead of
+// routing everything through an SSH tunnel.
+func (d *DockerOrchestrator) WorkloadAddress(ctx context.Context, name string, containerPort int) (string, int, error) {
+	inspect, err := d.client.ContainerInspect(ctx, name)
+	if err != nil {
+		return "", 0, fmt.Errorf("inspect container %s: %w", name, err)
+	}
+
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		if ep, ok := inspect.NetworkSettings.Networks[networkName]; ok && ep.IPAddress != "" {
+			return ep.IPAddress, containerPort, nil
+		}
+	}
+	portKey := nat.Port(fmt.Sprintf("%d/tcp", containerPort))
+	if bindings, ok := inspect.NetworkSettings.Ports[portKey]; ok && len(bindings) > 0 {
+		port := 0
+		fmt.Sscanf(bindings[0].HostPort, "%d", &port)
+		if port > 0 {
+			return "127.0.0.1", port, nil
+		}
+	}
+	if ep, ok := inspect.NetworkSettings.Networks[networkName]; ok && ep.IPAddress != "" {
+		return ep.IPAddress, containerPort, nil
+	}
+	return "", 0, fmt.Errorf("cannot determine address for %s:%d", name, containerPort)
+}
+
 // --- internals ---
 
 func (d *DockerOrchestrator) applyVolumesDocker(ctx context.Context, vols []VolumeMount) error {
@@ -186,10 +216,12 @@ func (d *DockerOrchestrator) buildContainerConfig(spec WorkloadSpec) (*container
 	for _, p := range spec.Ports {
 		key := nat.Port(fmt.Sprintf("%d/tcp", p.ContainerPort))
 		exposed[key] = struct{}{}
-		// Only port 22 needs publishing; CDP/VNC stay loopback-only inside the
-		// container per the SSH-tunnel design. Publishing 22 lets the host
-		// reach SSH when the control plane runs outside Docker.
-		if p.ContainerPort == 22 {
+		// Port 22 (SSH) always gets published so the host can reach it when the
+		// control plane runs outside Docker; CDP/VNC stay loopback-only inside
+		// the container per the SSH-tunnel design. Any other port is published
+		// only when the caller opts in via Publish (e.g. connectorprov's HTTP
+		// port), keeping every existing workload's port exposure unchanged.
+		if p.ContainerPort == 22 || p.Publish {
 			bindings[key] = []nat.PortBinding{{HostIP: "127.0.0.1", HostPort: ""}}
 		}
 	}

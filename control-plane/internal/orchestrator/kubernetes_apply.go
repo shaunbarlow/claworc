@@ -94,6 +94,20 @@ func (k *KubernetesOrchestrator) WorkloadSSHAddress(ctx context.Context, name st
 	return pod.Status.PodIP, 22, nil
 }
 
+// WorkloadAddress returns the in-cluster DNS name of the ClusterIP Service
+// Apply created for the workload (see applyService) and the requested
+// container port. Unlike WorkloadSSHAddress, which dials the pod IP directly
+// because sshd is reached via a per-pod SSH client, this goes through the
+// Service so a rolling pod replacement doesn't invalidate the address -- the
+// caller (e.g. connectorprov's HTTP client) can hold onto it across restarts.
+func (k *KubernetesOrchestrator) WorkloadAddress(ctx context.Context, name string, containerPort int) (string, int, error) {
+	ns := k.ns()
+	if _, err := k.clientset.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{}); err != nil {
+		return "", 0, fmt.Errorf("get service %s: %w", name, err)
+	}
+	return fmt.Sprintf("%s.%s.svc.cluster.local", name, ns), containerPort, nil
+}
+
 // --- internals ---
 
 func (k *KubernetesOrchestrator) applyVolumes(ctx context.Context, ns string, vols []VolumeMount) error {

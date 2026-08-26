@@ -153,10 +153,25 @@ type Instance struct {
 	// OPENCLAW_INITIAL_DISCORD env var and pushed over SSH on edit. The bot
 	// token lives in EnvVars as DISCORD_BOT_TOKEN (OpenClaw's env fallback
 	// for the default account). Empty = never configured.
-	DiscordConfig string    `gorm:"type:text;default:''" json:"-"`
-	TeamID        uint      `gorm:"not null;default:1;index" json:"team_id"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	DiscordConfig string `gorm:"type:text;default:''" json:"-"`
+	// ConnectorRuntimeToken is this instance's scoped OpenConnector runtime
+	// token (fernet-encrypted at rest), minted by the control plane against
+	// the shared managed connector service when connector_enabled is on and
+	// injected into the container as OOMOL_CONNECT_RUNTIME_TOKEN /
+	// OPEN_CONNECTOR_BASE_URL. Empty = the agent has no managed connector
+	// access (feature off, or minting hasn't happened yet). See
+	// internal/handlers/connector.go.
+	ConnectorRuntimeToken string `json:"-"`
+	// ConnectorTokenID is the connector's own stable record ID for
+	// ConnectorRuntimeToken (returned once at mint time alongside the
+	// plaintext token). Needed to revoke the token via DELETE
+	// /api/runtime-tokens/:id when the instance is deleted or the connector
+	// feature is turned off for it; the plaintext token itself cannot be
+	// looked back up from the connector's own API once minted.
+	ConnectorTokenID string    `gorm:"default:''" json:"-"`
+	TeamID           uint      `gorm:"not null;default:1;index" json:"team_id"`
+	CreatedAt             time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Team groups instances and users together. A "Default Team" is seeded

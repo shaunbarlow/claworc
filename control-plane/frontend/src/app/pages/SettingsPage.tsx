@@ -20,6 +20,7 @@ import PortsEditor from "@common/components/PortsEditor";
 import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
 import ContextEngineSettingsEditor from "@common/components/ContextEngineSettingsEditor";
 import { useHealth } from "@common/hooks/useHealth";
+import { useConnectorStatus } from "@common/hooks/useConnectorStatus";
 import StickyActionBar from "@common/components/StickyActionBar";
 import Page from "@common/components/Page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -845,6 +846,12 @@ function MiscTab({
     onError: (err) => errorToast("Failed to start control plane update", err),
   });
 
+  const connectorEnabled = settings.connector_enabled === true || settings.connector_enabled === "true";
+  const connectorStatus = useConnectorStatus(connectorEnabled);
+  const connectorMutation = useUpdateSettings();
+  const [connectorImageDraft, setConnectorImageDraft] = useState(settings.connector_image || "");
+  const connectorImageDirty = connectorImageDraft !== (settings.connector_image || "");
+
   return (
     <div className="space-y-8 max-w-2xl">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -914,6 +921,107 @@ function MiscTab({
               selfUpdateMutation.mutate();
             }}
           />
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-900">Managed OpenConnector</h3>
+          <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={connectorEnabled}
+              disabled={connectorMutation.isPending}
+              onChange={(e) => {
+                connectorMutation.mutate(
+                  { connector_enabled: e.target.checked ? "true" : "false" },
+                  {
+                    onSuccess: () =>
+                      successToast(
+                        e.target.checked
+                          ? "Managed connector enabled — the service is starting up."
+                          : "Managed connector disabled.",
+                      ),
+                    onError: (err) => errorToast("Failed to update connector setting", err),
+                  },
+                );
+              }}
+            />
+            Enabled
+          </label>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Runs a single shared OpenConnector (OOMOL Connect) service that every agent instance can
+          reach for third-party provider actions. Each agent gets its own scoped runtime token,
+          minted automatically — no shared secret pasted into every instance's env vars.
+        </p>
+        {connectorEnabled && (
+          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">Status:</span>
+              {connectorStatus.isLoading && <span className="text-gray-400">Loading…</span>}
+              {connectorStatus.data && (
+                <span
+                  className={
+                    connectorStatus.data.status === "running"
+                      ? "text-green-700 font-medium"
+                      : connectorStatus.data.status === "error"
+                        ? "text-red-600 font-medium"
+                        : "text-amber-600 font-medium"
+                  }
+                >
+                  {connectorStatus.data.status}
+                </span>
+              )}
+              {connectorStatus.data && !connectorStatus.data.configured && (
+                <span className="text-amber-600">(secrets not yet generated)</span>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Image</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={connectorImageDraft}
+                  onChange={(e) => setConnectorImageDraft(e.target.value)}
+                  placeholder="ghcr.io/shaunbarlow/open-connector:tip"
+                  className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {connectorImageDirty && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      connectorMutation.mutate(
+                        { connector_image: connectorImageDraft },
+                        {
+                          onSuccess: () => successToast("Connector image updated"),
+                          onError: (err) => errorToast("Failed to update connector image", err),
+                        },
+                      )
+                    }
+                    disabled={connectorMutation.isPending}
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Takes effect on the next re-apply (toggling the feature off/on, or a control plane
+                restart).
+              </p>
+            </div>
+            <div>
+              <a
+                href="/connector/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Open OpenConnector dashboard →
+              </a>
+            </div>
+          </div>
         )}
       </div>
 

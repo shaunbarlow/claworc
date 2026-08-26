@@ -76,6 +76,9 @@ func (m *mockOrch) EnsureSSHAccess(_ context.Context, _, _ string) error        
 func (m *mockOrch) WorkloadSSHAddress(_ context.Context, _ string) (string, int, error) {
 	return "", 0, nil
 }
+func (m *mockOrch) WorkloadAddress(_ context.Context, _ string, _ int) (string, int, error) {
+	return "", 0, nil
+}
 func (m *mockOrch) SelfUpdate(_ context.Context, _ string) (bool, error) { return false, nil }
 
 // --- test helpers ---

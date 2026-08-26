@@ -78,7 +78,15 @@ var tunnelProxyClient = &http.Client{
 // back from /openclaw/{id}/favicon.svg to /favicon.svg on a 404) before any
 // bytes have been committed to the client's ResponseWriter.
 func doProxyRequest(r *http.Request, port int, path string) (*http.Response, error) {
-	targetURL := fmt.Sprintf("http://127.0.0.1:%d/%s", port, path)
+	return doProxyRequestToHost(r, "127.0.0.1", port, path)
+}
+
+// doProxyRequestToHost is doProxyRequest generalized to an arbitrary host,
+// not just a loopback tunnel endpoint. Used by callers reaching a workload
+// directly over the claworc bridge network / cluster DNS (e.g. the managed
+// OpenConnector service) rather than through a per-instance SSH tunnel.
+func doProxyRequestToHost(r *http.Request, host string, port int, path string) (*http.Response, error) {
+	targetURL := fmt.Sprintf("http://%s:%d/%s", host, port, path)
 	if r.URL.RawQuery != "" {
 		targetURL += "?" + r.URL.RawQuery
 	}

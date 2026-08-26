@@ -791,6 +791,14 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 	for k, v := range buildSearchEnvVars(&inst) {
 		envVars[k] = v
 	}
+	// OpenConnector runtime token + base URL. Minting the token is a network
+	// call (see ensureInstanceConnectorToken) and never happens here --
+	// buildCreateParams stays pure and DB-read-only so it is safe to call from
+	// the env-drift check. This only ever renders a token the instance row
+	// already has.
+	for k, v := range buildConnectorEnvVars(&inst) {
+		envVars[k] = v
+	}
 
 	placement := instancePlacementParams(inst)
 
@@ -1294,6 +1302,14 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 					inst.ID, utils.SanitizeForLog(err.Error()))
 				fresh = inst
 			}
+
+			// Mint a scoped OpenConnector runtime token before building the
+			// spec, if the feature is enabled and this instance doesn't have
+			// one yet. Best-effort: buildConnectorEnvVars just renders
+			// whatever fresh.ConnectorRuntimeToken already holds, so a mint
+			// failure here only means the agent boots without connector
+			// access this time - not a create failure.
+			ensureInstanceConnectorToken(ctx, &fresh)
 
 			// buildCreateParams is the single source of truth for CreateParams
 			// (it merges global + per-instance env vars, then applies the
@@ -2042,6 +2058,13 @@ func DeleteInstance(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to stop tunnels for instance %d: %v", inst.ID, err)
 		}
 	}
+
+	// Revoke this instance's scoped OpenConnector runtime token, if any, so
+	// the connector's token list doesn't accumulate orphans. Best-effort and
+	// synchronous (a single admin-API DELETE) — cheap enough not to bother
+	// backgrounding, and doing it before the DB row is gone keeps
+	// ConnectorTokenID available without a re-read.
+	revokeInstanceConnectorToken(r.Context(), inst)
 
 	if orch := orchestrator.Get(); orch != nil {
 		// Cancel any in-flight browser spawn first so it can't recreate the pod

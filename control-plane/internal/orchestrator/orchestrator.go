@@ -93,6 +93,15 @@ type ContainerOrchestrator interface {
 	EnsureSSHAccess(ctx context.Context, name, publicKey string) error
 	WorkloadSSHAddress(ctx context.Context, name string) (host string, port int, err error)
 
+	// WorkloadAddress resolves the (host, port) to dial an arbitrary published
+	// TCP port on a generic workload created via Apply. Mirrors
+	// WorkloadSSHAddress's heuristic -- container IP on the claworc bridge when
+	// the control plane runs inside Docker, otherwise the published host port
+	// on loopback (Docker); pod IP directly (Kubernetes) -- but for any port,
+	// not just SSH's fixed 22. Used by feature packages that expose a plain
+	// HTTP service instead of (or in addition to) sshd, e.g. connectorprov.
+	WorkloadAddress(ctx context.Context, name string, containerPort int) (host string, port int, err error)
+
 	// Exec
 	ExecInInstance(ctx context.Context, name string, cmd []string) (stdout string, stderr string, exitCode int, err error)
 

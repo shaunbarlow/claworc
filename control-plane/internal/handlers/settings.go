@@ -12,7 +12,9 @@ import (
 
 // fixedEncryptedSettings are non-LLM keys stored as fixed setting entries.
 var fixedEncryptedSettings = map[string]bool{
-	"brave_api_key": true,
+	"brave_api_key":            true,
+	"connector_encryption_key": true,
+	"connector_admin_token":    true,
 }
 
 // plainSettings are returned as-is (not encrypted).
@@ -38,6 +40,10 @@ var plainSettings = []string{
 	"default_search_provider",
 	"default_context_engine",
 	"analytics_consent",
+	"connector_enabled",
+	"connector_image",
+	"connector_storage",
+	"connector_origin",
 }
 
 func getAllSettings() map[string]string {
@@ -216,6 +222,47 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handle the managed OpenConnector deployment. connector_enabled is the
+	// only field that triggers a lifecycle action (Apply/Stop); image/storage/
+	// origin are read fresh out of the database by resolvedConnectorConfig on
+	// every apply, so editing them alone (without touching connector_enabled)
+	// falls through to the generic plain-settings loop below and takes effect
+	// on the *next* apply rather than immediately -- matching how
+	// default_container_image only affects instances created/restarted after
+	// the edit, not already-running ones.
+	if v, ok := raw["connector_enabled"]; ok {
+		strVal, isString := v.(string)
+		boolVal, isBool := v.(bool)
+		var enabled bool
+		switch {
+		case isString:
+			if strVal != "true" && strVal != "false" {
+				writeError(w, http.StatusBadRequest, "connector_enabled must be true or false")
+				return
+			}
+			enabled = strVal == "true"
+		case isBool:
+			enabled = boolVal
+		default:
+			writeError(w, http.StatusBadRequest, "connector_enabled must be true or false")
+			return
+		}
+		prev, _ := database.GetSetting("connector_enabled")
+		prevEnabled := prev == "true"
+		if enabled {
+			database.SetSetting("connector_enabled", "true")
+			if _, err := ensureConnectorSecrets(); err != nil {
+				writeError(w, http.StatusInternalServerError, "Failed to generate connector secrets: "+err.Error())
+				return
+			}
+		} else {
+			database.SetSetting("connector_enabled", "false")
+		}
+		if enabled != prevEnabled {
+			applyConnectorAsync(enabled)
+		}
+	}
+
 	// Handle env_vars_set / env_vars_unset (PATCH-style for the encrypted map).
 	// envVarsChanged is true only when the resulting plaintext map actually
 	// differs from what was stored — a no-op request (e.g. re-setting the same
@@ -331,6 +378,16 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// Handle remaining plain settings
 	for key, val := range raw {
 		if key == "default_models" || key == "brave_api_key" || key == "env_vars_set" || key == "env_vars_unset" {
+			continue
+		}
+		if key == "connector_enabled" {
+			continue // handled above (secrets generation + Apply/Stop trigger)
+		}
+		if key == "connector_encryption_key" || key == "connector_admin_token" {
+			// Generated internally (ensureConnectorSecrets); never accepted as a
+			// direct plaintext write — fixedEncryptedSettings expects an
+			// already-encrypted value in the DB, and the generic loop below would
+			// otherwise happily store the caller's raw string as-is.
 			continue
 		}
 		if key == "default_pod_annotations" || key == "default_node_selector" || key == "default_tolerations" ||

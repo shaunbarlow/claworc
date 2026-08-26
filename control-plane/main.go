@@ -260,6 +260,10 @@ func main() {
 		handlers.OnBrowserStateChanged = refreshCDP
 	}
 
+	// Managed OpenConnector deployment: re-apply on boot if previously
+	// enabled, same reconcile-on-boot rationale as the browser bridge above.
+	handlers.BootApplyConnector()
+
 	// Start background tunnel manager to maintain SSH tunnels for running instances
 	if orch := orchestrator.Get(); orch != nil {
 		tunnelMgr.StartBackgroundManager(ctx, func(ctx context.Context) ([]uint, error) {
@@ -526,6 +530,10 @@ func main() {
 				r.Get("/orchestrator/status", handlers.GetOrchestratorStatus)
 				r.Post("/orchestrator/reinitialize", handlers.ReinitializeOrchestrator)
 
+				// Managed OpenConnector deployment status (settings PUT handles
+				// enable/configure; see handlers.UpdateSettings).
+				r.Get("/connector/status", handlers.GetConnectorStatus)
+
 				// LLM gateway providers and usage
 				r.Post("/llm/providers/test", handlers.TestProviderKey)
 				r.Post("/llm/providers/sync", handlers.SyncAllProviderModels)
@@ -580,6 +588,17 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(sessionStore))
 		r.HandleFunc("/openclaw/{id}/*", handlers.ControlProxy)
+	})
+
+	// Managed OpenConnector dashboard + admin API proxy, forwarded the same
+	// way the per-instance OpenClaw dashboard is (see ControlProxy above): no
+	// separate port or URL to expose, just another path on Claworc's own
+	// origin. Admin-only, since every proxied request carries the
+	// connector's own admin bearer token.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth(sessionStore))
+		r.Use(middleware.RequireAdmin)
+		r.HandleFunc("/connector/*", handlers.ConnectorProxy)
 	})
 
 	// Public webhook trigger — authenticated by a per-instance API key, no
