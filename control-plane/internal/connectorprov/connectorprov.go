@@ -128,13 +128,16 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 		Ports: []orchestrator.PortSpec{
 			{Name: "http", ContainerPort: containerPort, Publish: true},
 		},
-		Probes: orchestrator.ProbeSpec{
-			Liveness: &orchestrator.TCPProbe{
-				Port:         containerPort,
-				InitialDelay: 10 * time.Second,
-				Period:       30 * time.Second,
-			},
-		},
+		// No Probes.Liveness here deliberately: the generic Docker backend
+		// (docker_apply.go) turns any Probes.Liveness into a bash-based
+		// `>/dev/tcp/...` CMD-SHELL healthcheck, which requires bash. Every
+		// other workload this orchestrator manages is Debian-based and has
+		// bash, but open-connector's image is `node:24-alpine`, which does
+		// not ship bash. That combination made the container-level
+		// healthcheck fail unconditionally and clobbered the image's own
+		// working baked-in HEALTHCHECK (`CMD ["node", "scripts/healthcheck.ts"]`
+		// against /health), permanently marking the container "unhealthy".
+		// Leaving Probes unset lets that image-native healthcheck stand.
 	}
 }
 
