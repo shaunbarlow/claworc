@@ -121,7 +121,18 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 		Labels: map[string]string{
 			"claworc-role": "connector",
 		},
-		Pull: orchestrator.PullIfNotPresent,
+		// PullAlways: the connector is deployed from a mutable tag
+		// (default "ghcr.io/shaunbarlow/open-connector:tip", but any tag an
+		// admin points it at is equally mutable). PullIfNotPresent would
+		// only ever pull the very first time the tag is seen -- once
+		// cached locally (Docker) or on a node (Kubernetes), every later
+		// Apply (including the explicit "update to latest" action, see
+		// handlers.UpdateConnectorImage) would silently reuse the stale
+		// image forever instead of picking up a newer build pushed under
+		// the same tag. Docker's Apply force-pulls on PullAlways (see
+		// docker_apply.go); Kubernetes sets imagePullPolicy: Always, which
+		// makes the kubelet re-pull on every pod (re)start.
+		Pull: orchestrator.PullAlways,
 		Volumes: []orchestrator.VolumeMount{
 			{Name: dataVolumeName, Size: storage, MountPath: "/app/data"},
 		},

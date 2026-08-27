@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gluk-w/claworc/control-plane/internal/analytics"
 	"github.com/gluk-w/claworc/control-plane/internal/connectorprov"
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/orchestrator"
+	"github.com/gluk-w/claworc/control-plane/internal/taskmanager"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 )
 
@@ -332,6 +334,96 @@ func GetConnectorStatus(w http.ResponseWriter, r *http.Request) {
 		resp["status"] = status
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// UpdateConnectorImage handles POST /api/v1/connector/update-image
+// (admin-only). Forces a fresh pull-and-recreate of the managed connector
+// workload against whatever image reference is currently configured
+// (connector_image, default "ghcr.io/shaunbarlow/open-connector:tip").
+//
+// This exists because the connector is normally deployed from a mutable tag
+// ("tip") that gets pushed to repeatedly upstream. Before this handler there
+// was no way to make Claworc actually fetch a newer image under that same
+// tag once it had been pulled once: toggling connector_enabled off/on
+// re-applies the *cached* image (mgr.Apply's Pull policy is now PullAlways,
+// see connectorprov.buildSpec, but that only helps once Apply actually runs
+// again), and there was no button/endpoint that called Apply on demand
+// without also flipping the enabled state. This is the explicit "pull
+// latest and restart" action, mirroring SelfUpdateControlPlane's role for
+// the control-plane's own image and UpdateInstanceImage's role for agent
+// instances.
+func UpdateConnectorImage(w http.ResponseWriter, r *http.Request) {
+	if !connectorEnabled() {
+		writeError(w, http.StatusConflict, "the managed connector is disabled")
+		return
+	}
+	orch := orchestrator.Get()
+	if orch == nil {
+		WriteOrchestratorUnavailable(w)
+		return
+	}
+	cfg, ok := resolvedConnectorConfig()
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "connector secrets are not configured yet")
+		return
+	}
+
+	userID := callerID(r)
+	log.Printf("Connector image update requested by user %d (image=%s)", userID, cfg.Image)
+	analytics.Track(r.Context(), analytics.EventConnectorImageUpdated, nil)
+
+	work := func(ctx context.Context) error {
+		mgr := connectorprov.New(orch)
+		// mgr.Apply always force-pulls (spec.Pull is PullAlways for this
+		// workload) and unconditionally stops+recreates the container
+		// (Docker) / rolls the Deployment (Kubernetes) -- unlike
+		// SelfUpdate's digest short-circuit, there is no "already up to
+		// date, skip" path here: this handler is the explicit, deliberate
+		// "pull now" action, so it always restarts once secrets/config are
+		// present. See buildSpec's Pull field comment for why a mutable tag
+		// needs PullAlways rather than PullIfNotPresent.
+		if err := mgr.Apply(ctx, cfg); err != nil {
+			return fmt.Errorf("apply connector workload: %w", err)
+		}
+		if err := mgr.WaitHealthy(ctx, 2*time.Minute); err != nil {
+			return fmt.Errorf("connector did not become healthy after update: %w", err)
+		}
+		return nil
+	}
+
+	taskID := ""
+	if TaskMgr != nil {
+		taskID = TaskMgr.Start(taskmanager.StartOpts{
+			Type:         taskmanager.TaskConnectorImageUpdate,
+			UserID:       userID,
+			ResourceName: "OpenConnector",
+			Title:        "Updating managed OpenConnector",
+			Run: func(ctx context.Context, h *taskmanager.Handle) error {
+				h.UpdateMessage("Pulling latest connector image...")
+				if err := work(ctx); err != nil {
+					log.Printf("Connector image update failed: %v", err)
+					return err
+				}
+				h.UpdateMessage("Connector updated and healthy.")
+				return nil
+			},
+		})
+	} else {
+		go func() {
+			// Independent background context: the HTTP request context is
+			// canceled the moment this handler returns, but the pull +
+			// container recreate must run to completion regardless.
+			if err := work(context.Background()); err != nil {
+				log.Printf("Connector image update (no task manager) failed: %v", err)
+			}
+		}()
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status":  "updating",
+		"task_id": taskID,
+		"detail":  fmt.Sprintf("Pulling %s and restarting the managed connector.", cfg.Image),
+	})
 }
 
 // ConnectorProxy proxies the OpenConnector Web Console + admin API to

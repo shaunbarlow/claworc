@@ -27,6 +27,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSettings, useUpdateSettings } from "@common/hooks/useSettings";
 import { useProviders, useCatalogIconMap } from "@common/hooks/useProviders";
 import { fetchSSHFingerprint, rotateSSHKey, selfUpdateControlPlane } from "@common/api/ssh";
+import { updateConnectorImage } from "@common/api/connector";
 import { syncAllProviders } from "@common/api/llm";
 import { successToast, errorToast } from "@common/utils/toast";
 import { validateResourceQuantities } from "@common/utils/resourceValidation";
@@ -851,6 +852,14 @@ function MiscTab({
   const connectorMutation = useUpdateSettings();
   const [connectorImageDraft, setConnectorImageDraft] = useState(settings.connector_image || "");
   const connectorImageDirty = connectorImageDraft !== (settings.connector_image || "");
+  const connectorUpdateImageMutation = useMutation({
+    mutationFn: updateConnectorImage,
+    onSuccess: () => {
+      successToast("Pulling the latest connector image and restarting — status will update shortly.");
+      connectorStatus.refetch();
+    },
+    onError: (err) => errorToast("Failed to update connector image", err),
+  });
 
   return (
     <div className="space-y-8 max-w-2xl">
@@ -976,6 +985,16 @@ function MiscTab({
               {connectorStatus.data && !connectorStatus.data.configured && (
                 <span className="text-amber-600">(secrets not yet generated)</span>
               )}
+              <button
+                type="button"
+                onClick={() => connectorUpdateImageMutation.mutate()}
+                disabled={connectorUpdateImageMutation.isPending}
+                title="Pull the latest image for the currently configured tag and restart the connector"
+                className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={11} className={connectorUpdateImageMutation.isPending ? "animate-spin" : ""} />
+                {connectorUpdateImageMutation.isPending ? "Updating…" : "Update image"}
+              </button>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Image</label>
@@ -1007,8 +1026,9 @@ function MiscTab({
                 )}
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                Takes effect on the next re-apply (toggling the feature off/on, or a control plane
-                restart).
+                Save, then use “Update image” above to pull this reference now and restart the
+                connector on it. A saved change alone only takes effect on the next re-apply
+                (toggling the feature off/on, or a control plane restart).
               </p>
             </div>
             <div>

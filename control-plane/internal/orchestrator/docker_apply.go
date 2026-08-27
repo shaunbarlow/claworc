@@ -27,7 +27,19 @@ import (
 // helper that mounts the volumes named in its Mounts list, runs the command,
 // exits, and only then is the main container created.
 func (d *DockerOrchestrator) Apply(ctx context.Context, spec WorkloadSpec) error {
-	if spec.Pull != PullNever {
+	switch spec.Pull {
+	case PullNever:
+		// Skip entirely -- caller asserts the image is already present.
+	case PullAlways:
+		// Bypass the local-image-exists short circuit in ensureImage: a
+		// mutable tag ("tip", "latest") can already resolve to *some* local
+		// image, which would make ensureImage a no-op forever and mask any
+		// newer build pushed under the same tag. force-pull unconditionally,
+		// mirroring UpdateImage's semantics for regular agent instances.
+		if err := d.forcePullImage(ctx, spec.Image); err != nil {
+			return err
+		}
+	default: // PullIfNotPresent (also the zero value)
 		if err := d.ensureImage(ctx, spec.Image); err != nil {
 			return err
 		}

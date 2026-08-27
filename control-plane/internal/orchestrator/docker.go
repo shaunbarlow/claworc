@@ -208,6 +208,28 @@ func (d *DockerOrchestrator) ensureImage(ctx context.Context, img string) error 
 	return nil
 }
 
+// forcePullImage always hits the registry for img, regardless of whatever
+// is already cached locally under that reference. Needed for any tag that
+// isn't content-addressable ("tip", "latest", a branch tag): once such a
+// tag has been pulled once, ensureImage's "exists locally" check would
+// short-circuit forever and silently keep running the first build ever
+// pulled, even after newer images are pushed to the same tag upstream.
+// Shared by UpdateImage (agent instances) and Apply when spec.Pull is
+// PullAlways (generic workloads, e.g. connectorprov).
+func (d *DockerOrchestrator) forcePullImage(ctx context.Context, img string) error {
+	log.Printf("Force-pulling image %s", utils.SanitizeForLog(img))
+	reader, err := d.client.ImagePull(ctx, img, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w", img, err)
+	}
+	defer reader.Close()
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return fmt.Errorf("pull image %s: %w", img, err)
+	}
+	log.Printf("Image %s pulled successfully", utils.SanitizeForLog(img))
+	return nil
+}
+
 // CreateInstance ignores params.Ports and params.ServiceAccountAnnotations:
 // Docker containers already publish their fixed port set below, and there is
 // no ServiceAccount concept outside Kubernetes. Both are K8s-only knobs - see
@@ -370,14 +392,9 @@ func (d *DockerOrchestrator) ensureSharedVolumes(ctx context.Context, mounts []S
 
 func (d *DockerOrchestrator) UpdateImage(ctx context.Context, name string, params CreateParams) error {
 	// Force-pull the latest image (bypass local cache)
-	log.Printf("Force-pulling image %s for instance %s", params.ContainerImage, utils.SanitizeForLog(name))
-	reader, err := d.client.ImagePull(ctx, params.ContainerImage, image.PullOptions{})
-	if err != nil {
-		return fmt.Errorf("pull image %s: %w", params.ContainerImage, err)
+	if err := d.forcePullImage(ctx, params.ContainerImage); err != nil {
+		return err
 	}
-	defer reader.Close()
-	io.Copy(io.Discard, reader)
-	log.Printf("Image %s pulled successfully", params.ContainerImage)
 
 	// Stop and remove the old container (volumes are preserved)
 	timeout := 30

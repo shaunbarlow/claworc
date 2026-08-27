@@ -533,6 +533,10 @@ func main() {
 				// Managed OpenConnector deployment status (settings PUT handles
 				// enable/configure; see handlers.UpdateSettings).
 				r.Get("/connector/status", handlers.GetConnectorStatus)
+				// Force a pull-and-restart of the connector workload against its
+				// currently configured (mutable-tag) image, without touching
+				// connector_enabled. See handlers.UpdateConnectorImage.
+				r.Post("/connector/update-image", handlers.UpdateConnectorImage)
 
 				// LLM gateway providers and usage
 				r.Post("/llm/providers/test", handlers.TestProviderKey)

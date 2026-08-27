@@ -21,6 +21,7 @@ const (
 	EventOptOut                 = "opt_out"
 	EventHeartbeat              = "heartbeat"
 	EventControlPlaneSelfUpdate = "control_plane_self_update"
+	EventConnectorImageUpdated  = "connector_image_updated"
 )
 
 // AllowedEvents is the set of events accepted by the collector. Mirrors the
@@ -46,4 +47,5 @@ var AllowedEvents = map[string]bool{
 	EventOptOut:                 true,
 	EventHeartbeat:              true,
 	EventControlPlaneSelfUpdate: true,
+	EventConnectorImageUpdated:  true,
 }

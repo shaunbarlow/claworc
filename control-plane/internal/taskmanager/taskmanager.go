@@ -32,6 +32,11 @@ const (
 	// (see handlers.SelfUpdateControlPlane). System task -- not tied to any
 	// instance, admin-only visibility.
 	TaskControlPlaneSelfUpdate TaskType = "controlplane.self_update"
+	// TaskConnectorImageUpdate tracks a manually triggered pull-and-restart
+	// of the managed OpenConnector workload (see handlers.UpdateConnectorImage).
+	// System task, not tied to any instance -- admin-only visibility, same as
+	// TaskControlPlaneSelfUpdate.
+	TaskConnectorImageUpdate TaskType = "connector.image_update"
 )
 
 // State is the lifecycle position of a task.

@@ -2,6 +2,8 @@ package connectorprov
 
 import (
 	"testing"
+
+	"github.com/gluk-w/claworc/control-plane/internal/orchestrator"
 )
 
 func TestBuildSpec_FixedNameAndPort(t *testing.T) {
@@ -29,6 +31,9 @@ func TestBuildSpec_FixedNameAndPort(t *testing.T) {
 	}
 	if len(spec.Volumes) != 1 || spec.Volumes[0].Size != "5Gi" || spec.Volumes[0].MountPath != "/app/data" {
 		t.Fatalf("expected one data volume sized 5Gi at /app/data, got %+v", spec.Volumes)
+	}
+	if spec.Pull != orchestrator.PullAlways {
+		t.Errorf("spec.Pull = %v, want PullAlways so a mutable tag (e.g. :tip) is re-pulled on every Apply", spec.Pull)
 	}
 }
 
