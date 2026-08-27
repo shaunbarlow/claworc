@@ -6,9 +6,53 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gluk-w/claworc/control-plane/internal/config"
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 )
+
+func TestResolveConnectorOrigin_ExplicitWins(t *testing.T) {
+	prev := config.Cfg.RPOrigins
+	config.Cfg.RPOrigins = []string{"https://claworc.example.com"}
+	t.Cleanup(func() { config.Cfg.RPOrigins = prev })
+
+	origin, source := resolveConnectorOrigin("https://manual-override.example.com/")
+	if origin != "https://manual-override.example.com" {
+		t.Errorf("origin = %q, want trailing slash trimmed explicit value", origin)
+	}
+	if source != "explicit" {
+		t.Errorf("source = %q, want \"explicit\"", source)
+	}
+}
+
+func TestResolveConnectorOrigin_AutoDerivesFromRPOrigins(t *testing.T) {
+	prev := config.Cfg.RPOrigins
+	config.Cfg.RPOrigins = []string{"https://claworc.example.com/"}
+	t.Cleanup(func() { config.Cfg.RPOrigins = prev })
+
+	origin, source := resolveConnectorOrigin("")
+	want := "https://claworc.example.com/connector"
+	if origin != want {
+		t.Errorf("origin = %q, want %q", origin, want)
+	}
+	if source != "auto" {
+		t.Errorf("source = %q, want \"auto\"", source)
+	}
+}
+
+func TestResolveConnectorOrigin_EmptyWhenNothingConfigured(t *testing.T) {
+	prev := config.Cfg.RPOrigins
+	config.Cfg.RPOrigins = nil
+	t.Cleanup(func() { config.Cfg.RPOrigins = prev })
+
+	origin, source := resolveConnectorOrigin("")
+	if origin != "" {
+		t.Errorf("origin = %q, want empty when no explicit setting and no RPOrigins", origin)
+	}
+	if source != "auto" {
+		t.Errorf("source = %q, want \"auto\"", source)
+	}
+}
 
 func TestUpdateSettings_ConnectorEnabled_GeneratesSecretsOnce(t *testing.T) {
 	setupSettingsTest(t)

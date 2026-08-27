@@ -852,6 +852,8 @@ function MiscTab({
   const connectorMutation = useUpdateSettings();
   const [connectorImageDraft, setConnectorImageDraft] = useState(settings.connector_image || "");
   const connectorImageDirty = connectorImageDraft !== (settings.connector_image || "");
+  const [connectorOriginDraft, setConnectorOriginDraft] = useState(settings.connector_origin || "");
+  const connectorOriginDirty = connectorOriginDraft !== (settings.connector_origin || "");
   const connectorUpdateImageMutation = useMutation({
     mutationFn: updateConnectorImage,
     onSuccess: () => {
@@ -1029,6 +1031,63 @@ function MiscTab({
                 Save, then use “Update image” above to pull this reference now and restart the
                 connector on it. A saved change alone only takes effect on the next re-apply
                 (toggling the feature off/on, or a control plane restart).
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                OAuth callback origin
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={connectorOriginDraft}
+                  onChange={(e) => setConnectorOriginDraft(e.target.value)}
+                  placeholder="leave blank to auto-derive from this Claworc's own public origin"
+                  className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {connectorOriginDirty && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      connectorMutation.mutate(
+                        { connector_origin: connectorOriginDraft },
+                        {
+                          onSuccess: () =>
+                            successToast(
+                              "Connector OAuth origin updated — toggle the connector off/on or use “Update image” to apply it.",
+                            ),
+                          onError: (err) => errorToast("Failed to update connector origin", err),
+                        },
+                      )
+                    }
+                    disabled={connectorMutation.isPending}
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Blank auto-derives from Claworc's own public origin (the same host WebAuthn is
+                configured for) plus the <code>/connector</code> proxy prefix this deployment mounts
+                OpenConnector under. Set this only to override that — e.g. if Claworc sits behind a
+                different public hostname than what it thinks its own origin is.
+                {connectorStatus.data?.resolved_origin && (
+                  <>
+                    {" "}Currently applied:{" "}
+                    <code className="font-mono">
+                      {connectorStatus.data.resolved_origin}/oauth/callback
+                    </code>{" "}
+                    ({connectorStatus.data.origin_source === "auto" ? "auto-derived" : "explicit"}).
+                    Register that URL as the redirect URI with each third-party OAuth app.
+                  </>
+                )}
+                {connectorStatus.data && !connectorStatus.data.resolved_origin && (
+                  <>
+                    {" "}No origin could be derived (RP_ORIGINS is unset) — OAuth flows through this
+                    connector will silently fail until one is set here.
+                  </>
+                )}
               </p>
             </div>
             <div>

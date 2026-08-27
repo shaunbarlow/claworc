@@ -5,6 +5,10 @@ export interface ConnectorStatus {
   configured: boolean;
   status: string;
   error?: string;
+  /** The OOMOL_CONNECT_ORIGIN value actually applied to the connector container. */
+  resolved_origin?: string;
+  /** "explicit" when connector_origin was set by an admin, "auto" when derived from Claworc's own public origin. */
+  origin_source?: "explicit" | "auto";
 }
 
 export async function fetchConnectorStatus(): Promise<ConnectorStatus> {

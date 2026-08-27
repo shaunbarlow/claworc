@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gluk-w/claworc/control-plane/internal/analytics"
+	"github.com/gluk-w/claworc/control-plane/internal/config"
 	"github.com/gluk-w/claworc/control-plane/internal/connectorprov"
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/orchestrator"
@@ -53,7 +54,8 @@ func resolvedConnectorConfig() (cfg connectorprov.Config, ok bool) {
 	if storage == "" {
 		storage = defaultConnectorStorage
 	}
-	origin, _ := database.GetSetting("connector_origin")
+	explicitOrigin, _ := database.GetSetting("connector_origin")
+	origin, _ := resolveConnectorOrigin(explicitOrigin)
 
 	encKeyRaw, _ := database.GetSetting("connector_encryption_key")
 	adminTokenRaw, _ := database.GetSetting("connector_admin_token")
@@ -301,6 +303,40 @@ func BootApplyConnector() {
 	applyConnectorAsync(true)
 }
 
+// resolveConnectorOrigin returns the value that should be sent to
+// OpenConnector as OOMOL_CONNECT_ORIGIN, plus whether it was explicitly
+// configured ("explicit") or derived automatically from Claworc's own
+// public origin ("auto"). An admin-supplied connector_origin setting always
+// wins; otherwise this derives the origin OpenConnector needs from
+// config.Cfg.RPOrigins -- the same "what is Claworc's own public URL" value
+// already relied on for WebAuthn RP validation -- plus the "/connector"
+// prefix that ConnectorProxy mounts everything under (see ConnectorProxy's
+// doc comment and connectorprov.Config.Origin's doc comment for why the
+// bare host is wrong here: OpenConnector hardcodes "/oauth/callback" onto
+// whatever origin it's given, and that request only ever reaches
+// OpenConnector via Claworc's /connector/* proxy).
+//
+// Left unset (both no explicit setting and no usable RPOrigins entry), this
+// returns "" and callers fall back to whatever connectorprov/OpenConnector
+// itself defaults to (http://localhost:<port>, unreachable from a real
+// provider redirect) -- matching the previous "unset means OAuth silently
+// doesn't work" behavior for the one case (no configured public origin at
+// all) where auto-derivation has nothing sensible to derive from.
+func resolveConnectorOrigin(explicit string) (origin string, source string) {
+	explicit = strings.TrimRight(strings.TrimSpace(explicit), "/")
+	if explicit != "" {
+		return explicit, "explicit"
+	}
+	for _, o := range config.Cfg.RPOrigins {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		if o == "" {
+			continue
+		}
+		return o + "/connector", "auto"
+	}
+	return "", "auto"
+}
+
 // GetConnectorStatus handles GET /api/v1/connector/status (admin-only).
 // Surfaces enough for the Settings page to show a live badge: enabled flag,
 // coarse workload status, and whether secrets have been generated yet.
@@ -312,6 +348,11 @@ func GetConnectorStatus(w http.ResponseWriter, r *http.Request) {
 	encKeyRaw, _ := database.GetSetting("connector_encryption_key")
 	adminTokenRaw, _ := database.GetSetting("connector_admin_token")
 	resp["configured"] = encKeyRaw != "" && adminTokenRaw != ""
+
+	explicitOrigin, _ := database.GetSetting("connector_origin")
+	resolvedOrigin, originSource := resolveConnectorOrigin(explicitOrigin)
+	resp["resolved_origin"] = resolvedOrigin
+	resp["origin_source"] = originSource
 
 	if !enabled {
 		resp["status"] = "disabled"
