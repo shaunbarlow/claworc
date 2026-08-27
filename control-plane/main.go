@@ -605,6 +605,34 @@ func main() {
 		r.HandleFunc("/connector/*", handlers.ConnectorProxy)
 	})
 
+	// OAuth callback exemption: /connector/oauth/callback must be reachable
+	// with no Claworc session at all. The third-party provider redirects the
+	// browser here as a top-level navigation, and that navigation can arrive
+	// without a valid claworc_session cookie -- private/incognito windows,
+	// an expired session mid-flow, browsers that don't attach first-party
+	// cookies the way Lax same-site normally would for every provider's
+	// redirect shape, etc. Before this route existed, the RequireAuth +
+	// RequireAdmin group above rejected that request with 401/403 before it
+	// ever reached handlers.ConnectorProxy, independent of whether the
+	// state/PKCE parameters on the callback were valid -- the entire OAuth
+	// flow through the managed connector only worked if the admin's browser
+	// happened to still be logged into Claworc at the exact moment the
+	// provider redirected back.
+	//
+	// This does not weaken auth for the rest of /connector/*: chi's radix
+	// tree matches the static segment "/connector/oauth/callback" before it
+	// ever considers the wildcard "/connector/*" route registered above, so
+	// every other connector path (dashboard, admin API) still requires an
+	// authenticated admin session regardless of the order these groups are
+	// registered in. Safety for this one exempted path is enforced by
+	// OpenConnector itself: /oauth/callback is a single-use, time-boxed,
+	// (optionally PKCE-bound) state token minted by this same admin's prior
+	// POST /api/oauth/authorizations call -- see OAuthFlowService in
+	// open-connector -- so an unauthenticated caller who doesn't already hold
+	// a live state+code pair from the real provider redirect gets rejected by
+	// OpenConnector's own completeAuthorization, not by Claworc's proxy.
+	r.Get("/connector/oauth/callback", handlers.ConnectorProxy)
+
 	// Public webhook trigger — authenticated by a per-instance API key, no
 	// session required. The path uses the stable Instance.UUID to avoid
 	// leaking sequential IDs.
