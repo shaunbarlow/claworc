@@ -215,6 +215,40 @@ func TestProxyToLocalPort_ForwardsHeaders(t *testing.T) {
 	}
 }
 
+// TestDoProxyRequestToHost_ForwardsAuthorization guards against a regression
+// where ConnectorProxy's injected admin bearer token (see connector.go)
+// silently never reached OpenConnector: doProxyRequestToHost builds a brand
+// new upstream request and only copies an explicit header allowlist, and
+// Authorization was missing from it. The connector's own auth middleware
+// then saw no bearer token on any proxied API call, reported
+// authenticated=false, and the SPA fell back to its manual "enter unlock
+// token" screen -- a token Claworc deliberately never surfaces in its UI.
+func TestDoProxyRequestToHost_ForwardsAuthorization(t *testing.T) {
+	var gotAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	_, portStr, _ := net.SplitHostPort(strings.TrimPrefix(backend.URL, "http://"))
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+
+	req := httptest.NewRequest("GET", "/connector/api/auth/session", nil)
+	req.Header.Set("Authorization", "Bearer super-secret-admin-token")
+
+	resp, err := doProxyRequestToHost(req, "127.0.0.1", port, "api/auth/session")
+	if err != nil {
+		t.Fatalf("doProxyRequestToHost returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if gotAuth != "Bearer super-secret-admin-token" {
+		t.Errorf("Authorization header not forwarded to upstream, got %q", gotAuth)
+	}
+}
+
 func TestProxyToLocalPort_BackendDown(t *testing.T) {
 	// Use a port that's not listening
 	listener, _ := net.Listen("tcp", "127.0.0.1:0")

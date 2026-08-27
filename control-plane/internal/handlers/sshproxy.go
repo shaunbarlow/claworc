@@ -98,11 +98,19 @@ func doProxyRequestToHost(r *http.Request, host string, port int, path string) (
 		return nil, fmt.Errorf("create proxy request: %w", err)
 	}
 
-	// Forward relevant headers
+	// Forward relevant headers. Authorization must be included: ConnectorProxy
+	// injects the managed connector's admin bearer token onto the incoming
+	// request (see connector.go) precisely so the browser never needs to know
+	// or paste that token by hand. Dropping it here silently defeated that --
+	// the connector's own auth middleware saw no Authorization header on any
+	// proxied API call, reported authenticated=false, and the OpenConnector
+	// SPA fell back to its manual "enter unlock token" screen, a token Claworc
+	// deliberately never surfaces anywhere in its own UI.
 	for _, h := range []string{
 		"Accept", "Accept-Encoding", "Accept-Language",
 		"Content-Type", "Content-Length",
 		"Range", "If-None-Match", "If-Modified-Since",
+		"Authorization",
 	} {
 		if v := r.Header.Get(h); v != "" {
 			proxyReq.Header.Set(h, v)
