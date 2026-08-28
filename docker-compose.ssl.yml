@@ -1,0 +1,56 @@
+# Alternative to docker-compose.yml: fronts Claworc with Caddy for automatic
+# HTTPS (Let's Encrypt) and stops publishing the dashboard port to the
+# internet — it's bound to 127.0.0.1 only, reachable via Caddy or SSH tunnel.
+#
+# Use this INSTEAD of docker-compose.yml, not alongside it.
+#
+#   CLAWORC_DOMAIN=claworc.example.com docker compose -f docker-compose.ssl.yml up -d
+#
+# Requirements:
+#   - CLAWORC_DOMAIN must resolve (DNS A/AAAA) to this host's public IP.
+#   - Ports 80 and 443 must be reachable from the internet — Caddy uses 80
+#     for the ACME HTTP-01 challenge and to redirect to 443.
+#
+# The inbound SSH gateway (port 2222) is unrelated to the web dashboard and
+# stays published as-is; Caddy only fronts HTTP.
+
+services:
+  control-plane:
+    image: claworc/claworc:latest
+    ports:
+      - "127.0.0.1:8000:8000"   # local-only; Caddy is the public entrypoint
+      - "2222:2222"             # inbound SSH gateway (ssh <user>+<agent>@host)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - claworc-data:/app/data
+    environment:
+      - CLAWORC_DATA_PATH=/app/data
+    restart: unless-stopped
+    networks:
+      - claworc
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - CLAWORC_DOMAIN=${CLAWORC_DOMAIN:?set CLAWORC_DOMAIN to your public hostname, e.g. claworc.example.com}
+    depends_on:
+      - control-plane
+    restart: unless-stopped
+    networks:
+      - claworc
+
+volumes:
+  claworc-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  claworc:
+    name: claworc   # exact name, no compose project prefix
