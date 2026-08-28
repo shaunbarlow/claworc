@@ -16,7 +16,8 @@
 
 services:
   control-plane:
-    image: claworc/claworc:latest
+    image: shaunbarlow/claworc:latest
+    container_name: claworc   # must match CLAWORC_SELF_CONTAINER_NAME default ("claworc") for self-update to find this container
     ports:
       - "127.0.0.1:8000:8000"   # local-only; Caddy is the public entrypoint
       - "2222:2222"             # inbound SSH gateway (ssh <user>+<agent>@host)

@@ -1,7 +1,8 @@
 # This is an example. It is recommended to use install.sh or install.ps1 depending on your operating system
 services:
   control-plane:
-    image: claworc/claworc:latest
+    image: shaunbarlow/claworc:latest
+    container_name: claworc   # must match CLAWORC_SELF_CONTAINER_NAME default ("claworc") for self-update to find this container
     ports:
       - "8000:8000"
       - "2222:2222"   # inbound SSH gateway (ssh <user>+<agent>@host)
