@@ -9,8 +9,7 @@
     "attachOnly": true,
     "profiles": {
       "remote": {
-        "cdpUrl": "http://127.0.0.1:9222",
-        "color": "#00AA00"
+        "cdpUrl": "http://127.0.0.1:9222"
       }
     }
 }
