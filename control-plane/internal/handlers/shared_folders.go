@@ -197,33 +197,33 @@ func ListSharedFolders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type folderResponse struct {
-		ID          uint   `json:"id"`
-		Name        string `json:"name"`
-		MountPath   string `json:"mount_path"`
-		HostPath    string `json:"host_path"`
-		ReadOnly    bool   `json:"read_only"`
-		QmdIndex    bool   `json:"qmd_index"`
-		QmdPattern  string `json:"qmd_pattern"`
-		OwnerID     uint   `json:"owner_id"`
-		InstanceIDs []uint `json:"instance_ids"`
-		TeamIDs     []uint `json:"team_ids"`
-		CreatedAt   string `json:"created_at"`
+		ID                 uint   `json:"id"`
+		Name               string `json:"name"`
+		MountPath          string `json:"mount_path"`
+		HostPath           string `json:"host_path"`
+		ReadOnly           bool   `json:"read_only"`
+		MemoryIndex        bool   `json:"memory_index"`
+		MemoryIndexPattern string `json:"memory_index_pattern"`
+		OwnerID            uint   `json:"owner_id"`
+		InstanceIDs        []uint `json:"instance_ids"`
+		TeamIDs            []uint `json:"team_ids"`
+		CreatedAt          string `json:"created_at"`
 	}
 
 	result := make([]folderResponse, 0, len(folders))
 	for _, sf := range folders {
 		result = append(result, folderResponse{
-			ID:          sf.ID,
-			Name:        sf.Name,
-			MountPath:   sf.MountPath,
-			HostPath:    sf.HostPath,
-			ReadOnly:    sf.ReadOnly,
-			QmdIndex:    sf.QmdIndex,
-			QmdPattern:  sf.QmdPattern,
-			OwnerID:     sf.OwnerID,
-			InstanceIDs: database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
-			TeamIDs:     database.ParseTeamIDs(sf.TeamIDs),
-			CreatedAt:   sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:                 sf.ID,
+			Name:               sf.Name,
+			MountPath:          sf.MountPath,
+			HostPath:           sf.HostPath,
+			ReadOnly:           sf.ReadOnly,
+			MemoryIndex:        sf.MemoryIndex,
+			MemoryIndexPattern: sf.MemoryIndexPattern,
+			OwnerID:            sf.OwnerID,
+			InstanceIDs:        database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
+			TeamIDs:            database.ParseTeamIDs(sf.TeamIDs),
+			CreatedAt:          sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
@@ -238,12 +238,12 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name       string `json:"name"`
-		MountPath  string `json:"mount_path"`
-		HostPath   string `json:"host_path"`
-		ReadOnly   *bool  `json:"read_only"`
-		QmdIndex   *bool  `json:"qmd_index"`
-		QmdPattern string `json:"qmd_pattern"`
+		Name               string `json:"name"`
+		MountPath          string `json:"mount_path"`
+		HostPath           string `json:"host_path"`
+		ReadOnly           *bool  `json:"read_only"`
+		MemoryIndex        *bool  `json:"memory_index"`
+		MemoryIndexPattern string `json:"memory_index_pattern"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -283,18 +283,18 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if !isValidQmdPattern(body.QmdPattern) {
-		writeError(w, http.StatusBadRequest, "Invalid qmd_pattern: must be a relative glob without \"..\"")
+	if !isValidMemoryIndexPattern(body.MemoryIndexPattern) {
+		writeError(w, http.StatusBadRequest, "Invalid memory_index_pattern: must be a relative glob without \"..\"")
 		return
 	}
 	sf := &database.SharedFolder{
-		Name:       body.Name,
-		MountPath:  body.MountPath,
-		OwnerID:    user.ID,
-		HostPath:   body.HostPath,
-		ReadOnly:   readOnly,
-		QmdIndex:   body.QmdIndex != nil && *body.QmdIndex,
-		QmdPattern: body.QmdPattern,
+		Name:               body.Name,
+		MountPath:          body.MountPath,
+		OwnerID:            user.ID,
+		HostPath:           body.HostPath,
+		ReadOnly:           readOnly,
+		MemoryIndex:        body.MemoryIndex != nil && *body.MemoryIndex,
+		MemoryIndexPattern: body.MemoryIndexPattern,
 	}
 	if err := database.CreateSharedFolder(sf); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create shared folder")
@@ -309,17 +309,17 @@ func CreateSharedFolder(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":           sf.ID,
-		"name":         sf.Name,
-		"mount_path":   sf.MountPath,
-		"host_path":    sf.HostPath,
-		"read_only":    sf.ReadOnly,
-		"qmd_index":    sf.QmdIndex,
-		"qmd_pattern":  sf.QmdPattern,
-		"owner_id":     sf.OwnerID,
-		"instance_ids": []uint{},
-		"team_ids":     []uint{},
-		"created_at":   sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"id":                   sf.ID,
+		"name":                 sf.Name,
+		"mount_path":           sf.MountPath,
+		"host_path":            sf.HostPath,
+		"read_only":            sf.ReadOnly,
+		"memory_index":         sf.MemoryIndex,
+		"memory_index_pattern": sf.MemoryIndexPattern,
+		"owner_id":             sf.OwnerID,
+		"instance_ids":         []uint{},
+		"team_ids":             []uint{},
+		"created_at":           sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	})
 }
 
@@ -368,17 +368,17 @@ func GetSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id":           sf.ID,
-		"name":         sf.Name,
-		"mount_path":   sf.MountPath,
-		"host_path":    sf.HostPath,
-		"read_only":    sf.ReadOnly,
-		"qmd_index":    sf.QmdIndex,
-		"qmd_pattern":  sf.QmdPattern,
-		"owner_id":     sf.OwnerID,
-		"instance_ids": database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
-		"team_ids":     database.ParseTeamIDs(sf.TeamIDs),
-		"created_at":   sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"id":                   sf.ID,
+		"name":                 sf.Name,
+		"mount_path":           sf.MountPath,
+		"host_path":            sf.HostPath,
+		"read_only":            sf.ReadOnly,
+		"memory_index":         sf.MemoryIndex,
+		"memory_index_pattern": sf.MemoryIndexPattern,
+		"owner_id":             sf.OwnerID,
+		"instance_ids":         database.ParseSharedFolderInstanceIDs(sf.InstanceIDs),
+		"team_ids":             database.ParseTeamIDs(sf.TeamIDs),
+		"created_at":           sf.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	})
 }
 
@@ -407,14 +407,14 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name        *string `json:"name"`
-		MountPath   *string `json:"mount_path"`
-		HostPath    *string `json:"host_path"`
-		ReadOnly    *bool   `json:"read_only"`
-		QmdIndex    *bool   `json:"qmd_index"`
-		QmdPattern  *string `json:"qmd_pattern"`
-		InstanceIDs *[]uint `json:"instance_ids"`
-		TeamIDs     *[]uint `json:"team_ids"`
+		Name               *string `json:"name"`
+		MountPath          *string `json:"mount_path"`
+		HostPath           *string `json:"host_path"`
+		ReadOnly           *bool   `json:"read_only"`
+		MemoryIndex        *bool   `json:"memory_index"`
+		MemoryIndexPattern *string `json:"memory_index_pattern"`
+		InstanceIDs        *[]uint `json:"instance_ids"`
+		TeamIDs            *[]uint `json:"team_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -486,18 +486,18 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 		updates["team_ids"] = database.EncodeTeamIDs(newTeamIDs)
 		membershipChanged = true
 	}
-	qmdChanged := false
-	if body.QmdIndex != nil && *body.QmdIndex != sf.QmdIndex {
-		updates["qmd_index"] = *body.QmdIndex
-		qmdChanged = true
+	memoryIndexChanged := false
+	if body.MemoryIndex != nil && *body.MemoryIndex != sf.MemoryIndex {
+		updates["memory_index"] = *body.MemoryIndex
+		memoryIndexChanged = true
 	}
-	if body.QmdPattern != nil && *body.QmdPattern != sf.QmdPattern {
-		if !isValidQmdPattern(*body.QmdPattern) {
-			writeError(w, http.StatusBadRequest, "Invalid qmd_pattern: must be a relative glob without \"..\"")
+	if body.MemoryIndexPattern != nil && *body.MemoryIndexPattern != sf.MemoryIndexPattern {
+		if !isValidMemoryIndexPattern(*body.MemoryIndexPattern) {
+			writeError(w, http.StatusBadRequest, "Invalid memory_index_pattern: must be a relative glob without \"..\"")
 			return
 		}
-		updates["qmd_pattern"] = *body.QmdPattern
-		qmdChanged = true
+		updates["memory_index_pattern"] = *body.MemoryIndexPattern
+		memoryIndexChanged = true
 	}
 	mountPathChanged := body.MountPath != nil && *body.MountPath != sf.MountPath
 
@@ -527,15 +527,15 @@ func UpdateSharedFolder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconcile the OpenClaw memory config of affected instances whenever the
-	// folder's QMD indexing changed, or an indexed folder's membership/mount
+	// folder's memory indexing changed, or an indexed folder's membership/mount
 	// path changed. The container restart above alone doesn't rewrite
 	// openclaw.json (it lives on the home PVC); pushMemoryConfig's SSH wait
 	// rides out the restart.
-	nowIndexed := sf.QmdIndex
-	if body.QmdIndex != nil {
-		nowIndexed = *body.QmdIndex
+	nowIndexed := sf.MemoryIndex
+	if body.MemoryIndex != nil {
+		nowIndexed = *body.MemoryIndex
 	}
-	if qmdChanged || ((membershipChanged || mountPathChanged) && (sf.QmdIndex || nowIndexed)) {
+	if memoryIndexChanged || ((membershipChanged || mountPathChanged) && (sf.MemoryIndex || nowIndexed)) {
 		pushMemoryConfigForFolder(mergeUintSets(oldEffective, newEffective))
 	}
 
@@ -639,10 +639,10 @@ func symmetricDiffUint(a, b []uint) []uint {
 	return result
 }
 
-// isValidQmdPattern accepts the glob applied within an indexed folder:
-// empty (QMD's default), or a relative pattern with no parent traversal so
-// the index can't reach outside the mount.
-func isValidQmdPattern(p string) bool {
+// isValidMemoryIndexPattern accepts the glob applied within an indexed
+// folder: empty (index the whole folder), or a relative pattern with no
+// parent traversal so the index can't reach outside the mount.
+func isValidMemoryIndexPattern(p string) bool {
 	if p == "" {
 		return true
 	}
@@ -719,8 +719,8 @@ func DeleteSharedFolder(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("%s is being restarted", inst.DisplayName))
 	}
 
-	// Drop the folder from every affected instance's QMD index paths.
-	if sf.QmdIndex {
+	// Drop the folder from every affected instance's memory index paths.
+	if sf.MemoryIndex {
 		pushMemoryConfigForFolder(effectiveIDs)
 	}
 

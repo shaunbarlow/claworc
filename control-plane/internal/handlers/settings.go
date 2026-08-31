@@ -36,7 +36,6 @@ var plainSettings = []string{
 	"default_timezone",
 	"default_user_agent",
 	"default_models",
-	"default_memory_backend",
 	"default_search_provider",
 	"default_context_engine",
 	"analytics_consent",
@@ -128,8 +127,8 @@ func settingsToResponse(raw map[string]string) map[string]interface{} {
 	}
 	result["default_affinity"] = raw["default_affinity"]
 
-	// Global QMD memory defaults (JSON MemoryQmdSettings object).
-	result["default_memory_qmd"] = loadMemoryQmdSettings(raw["default_memory_qmd"])
+	// Global builtin memory defaults (JSON MemorySettings object).
+	result["default_memory_settings"] = loadMemorySettings(raw["default_memory_settings"])
 
 	// Global lossless-claw context-engine defaults (JSON LosslessClawSettings object).
 	result["default_context_engine_settings"] = loadLosslessClawSettings(raw["default_context_engine_settings"])
@@ -206,9 +205,8 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle default search provider. Validated up front like
-	// default_memory_backend; "" means leave OpenClaw's own auto-detection
-	// alone, so it's a valid value here unlike default_memory_backend.
+	// Handle default search provider. "" means leave OpenClaw's own
+	// auto-detection alone, which is a valid, explicit choice here.
 	if v, ok := raw["default_search_provider"]; ok {
 		if strVal, ok := v.(string); ok {
 			if !isValidSearchProvider(strVal) {
@@ -293,11 +291,9 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle default context engine. Validated up front like
-	// default_memory_backend; "" is accepted and resolves to "legacy"
+	// Handle default context engine. "" is accepted and resolves to "legacy"
 	// downstream (see effectiveContextEngine), matching default_search_provider's
-	// "empty means leave it alone" treatment more than default_memory_backend's
-	// required-non-empty rule.
+	// "empty means leave it alone" treatment.
 	contextEngineChanged := false
 	if v, ok := raw["default_context_engine"]; ok {
 		if strVal, ok := v.(string); ok {
@@ -328,36 +324,24 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		database.SetSetting("default_context_engine_settings", string(b))
 	}
 
-	// Handle memory backend defaults. Track whether either key actually
-	// changed so we can reconcile running instances' OpenClaw config below.
+	// Handle builtin memory defaults. Track whether the key actually changed
+	// so we can reconcile running instances' OpenClaw config below.
 	memoryChanged := false
-	if v, ok := raw["default_memory_backend"]; ok {
-		if strVal, ok := v.(string); ok {
-			if !isValidMemoryBackend(strVal) || strVal == "" {
-				writeError(w, http.StatusBadRequest, "default_memory_backend must be \"builtin\" or \"qmd\"")
-				return
-			}
-			prev, _ := database.GetSetting("default_memory_backend")
-			if strVal != prev {
-				memoryChanged = true
-			}
-		}
-	}
-	if v, ok := raw["default_memory_qmd"]; ok {
+	if v, ok := raw["default_memory_settings"]; ok {
 		b, err := json.Marshal(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid default_memory_qmd")
+			writeError(w, http.StatusBadRequest, "Invalid default_memory_settings")
 			return
 		}
-		if _, err := parseMemoryQmdSettings(b); err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid default_memory_qmd: "+err.Error())
+		if _, err := parseMemorySettings(b); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_memory_settings: "+err.Error())
 			return
 		}
-		prev, _ := database.GetSetting("default_memory_qmd")
+		prev, _ := database.GetSetting("default_memory_settings")
 		if string(b) != prev {
 			memoryChanged = true
 		}
-		database.SetSetting("default_memory_qmd", string(b))
+		database.SetSetting("default_memory_settings", string(b))
 	}
 
 	// Handle pod placement + service/port settings (stored as JSON strings)

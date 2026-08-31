@@ -167,12 +167,10 @@ func seedDefaults() error {
 		"default_browser_idle_minutes":  "15",
 		"default_browser_ready_seconds": "120",
 		"default_browser_storage":       "10Gi",
-		// Memory backend defaults. "builtin" preserves OpenClaw's stock
-		// behavior; "qmd" switches new config pushes to the QMD sidecar.
-		// default_memory_qmd holds a JSON MemoryQmdSettings object applied
-		// to every instance without a per-instance override.
-		"default_memory_backend": "builtin",
-		"default_memory_qmd":     "{}",
+		// Global builtin memory defaults: a JSON MemorySettings object
+		// (embedding provider, search knobs, citations, session-transcript
+		// indexing) applied to every instance without a per-instance override.
+		"default_memory_settings": "{}",
 	}
 
 	for key, value := range defaults {

@@ -27,6 +27,6 @@ Claworc replaces this manual approach by:
 | [UI](ui.md) | Frontend pages, components, and interaction patterns |
 | [Environment Variables](environment-variables.md) | Global and per-instance env vars, reserved names, and skill `required_env_vars` |
 | [SSH Connectivity](ssh-connectivity.md) | SSH architecture, tunnels, health monitoring, and key rotation |
-| [QMD Memory Backend](qmd-memory.md) | Configurable OpenClaw memory backend (builtin/QMD), defaults + overrides, shared-folder indexing |
+| [Builtin Memory Configuration](memory-config.md) | OpenClaw builtin memory.search.\* defaults + per-agent overrides, shared-folder indexing |
 | [Kubernetes Deployment](deployment/kubernetes.md) | Kubernetes deployment guide with SSH network policies and security contexts |
 | [Docker Deployment](deployment/docker.md) | Docker deployment guide with SSH network configuration |

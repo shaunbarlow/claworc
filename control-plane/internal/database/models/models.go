@@ -115,13 +115,11 @@ type Instance struct {
 	// possible — this forbids the pod entirely so no-browser agents consume
 	// no browser resources. Ignored for legacy embedded instances.
 	BrowserEnabled bool `gorm:"not null;default:true" json:"browser_enabled"`
-	// MemoryBackend overrides the global default_memory_backend setting for
-	// this instance's OpenClaw memory subsystem. "" = inherit the global
-	// default; otherwise "builtin" or "qmd".
-	MemoryBackend string `gorm:"default:''" json:"memory_backend"`
-	// MemoryQmd is a JSON MemoryQmdSettings override object merged on top of
-	// the global default_memory_qmd setting (field-wise; instance wins).
-	MemoryQmd string `gorm:"type:text;default:'{}'" json:"-"`
+	// MemorySettings is a JSON MemorySettings override object (builtin
+	// OpenClaw memory engine: embedding provider, search knobs, citations,
+	// session-transcript indexing) merged field-wise on top of the global
+	// default_memory_settings setting; instance wins.
+	MemorySettings string `gorm:"type:text;default:'{}'" json:"-"`
 	// SearchProvider overrides the global default_search_provider setting for
 	// this instance's OpenClaw web_search tool. "" = inherit the global
 	// default (which itself defaults to "", i.e. leave OpenClaw's own
@@ -170,8 +168,8 @@ type Instance struct {
 	// looked back up from the connector's own API once minted.
 	ConnectorTokenID string    `gorm:"default:''" json:"-"`
 	TeamID           uint      `gorm:"not null;default:1;index" json:"team_id"`
-	CreatedAt             time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt             time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	CreatedAt        time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // Team groups instances and users together. A "Default Team" is seeded
@@ -383,15 +381,16 @@ type SharedFolder struct {
 	// as "unset" and lets the DB default win, so an explicit read-write choice
 	// would be silently flipped back to read-only on insert.
 	ReadOnly bool `json:"read_only"`
-	// QmdIndex marks this folder for inclusion in the QMD memory index of
-	// every attached instance whose effective memory backend is "qmd". No
-	// GORM `default` tag for the same reason as ReadOnly above.
-	QmdIndex bool `json:"qmd_index"`
-	// QmdPattern is the glob applied within the folder when indexing.
-	// "" = QMD's default ("**/*.md").
-	QmdPattern string    `gorm:"default:''" json:"qmd_pattern"`
-	CreatedAt  time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt  time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	// MemoryIndex marks this folder for inclusion in every attached
+	// instance's builtin OpenClaw memory index (memory.search.extraPaths).
+	// No GORM `default` tag for the same reason as ReadOnly above.
+	MemoryIndex bool `json:"memory_index"`
+	// MemoryIndexPattern is the root-relative glob applied within the folder
+	// when indexing (rendered as the `pattern` half of a
+	// `{path, pattern}` extraPaths entry). "" indexes the whole folder.
+	MemoryIndexPattern string    `gorm:"default:''" json:"memory_index_pattern"`
+	CreatedAt          time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt          time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // ParseSharedFolderInstanceIDs deserializes the JSON instance IDs field.

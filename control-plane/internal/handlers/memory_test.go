@@ -15,204 +15,172 @@ import (
 func intPtr(v int) *int    { return &v }
 func boolPtr(v bool) *bool { return &v }
 
-func TestParseMemoryQmdSettings(t *testing.T) {
+func TestParseMemorySettings(t *testing.T) {
 	cases := []struct {
 		name    string
 		raw     string
 		wantErr bool
 	}{
 		{"empty", ``, false},
-		{"valid", `{"search_mode":"query","update_interval":"10m","max_results":8,"sessions_enabled":true,"include_default_memory":false}`, false},
-		{"advanced object", `{"advanced":{"limits":{"timeoutMs":8000}}}`, false},
-		{"bad search mode", `{"search_mode":"fuzzy"}`, true},
-		{"bad interval", `{"update_interval":"five minutes"}`, true},
+		{"valid", `{"provider":"openai","model":"text-embedding-3-small","fallback":"none","max_results":8,"min_score":0.35,"citations":"on","remember_across_conversations":true,"sessions_enabled":false}`, false},
+		{"custom provider id", `{"provider":"ollama-5080"}`, false},
+		{"advanced object", `{"advanced":{"remote":{"baseUrl":"https://example.com"}}}`, false},
+		{"bad citations", `{"citations":"maybe"}`, true},
 		{"max results too high", `{"max_results":500}`, true},
+		{"max results too low", `{"max_results":0}`, true},
+		{"min score out of range", `{"min_score":1.5}`, true},
 		{"advanced not object", `{"advanced":[1,2]}`, true},
-		{"unknown key", `{"serach_mode":"query"}`, true},
+		{"unknown key", `{"providr":"openai"}`, true},
+		{"blank provider", `{"provider":"   "}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseMemoryQmdSettings([]byte(tc.raw))
+			_, err := parseMemorySettings([]byte(tc.raw))
 			if (err != nil) != tc.wantErr {
-				t.Errorf("parseMemoryQmdSettings(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
+				t.Errorf("parseMemorySettings(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
 			}
 		})
 	}
 }
 
-func TestParseMemoryQmdSettings_Scope(t *testing.T) {
-	cases := []struct {
-		name    string
-		raw     string
-		wantErr bool
-	}{
-		{"valid direct+channel", `{"scope":{"default":"deny","rules":[{"action":"allow","chat_type":"direct"},{"action":"allow","chat_type":"channel"}]}}`, false},
-		{"valid default only", `{"scope":{"default":"allow"}}`, false},
-		{"bad default", `{"scope":{"default":"maybe"}}`, true},
-		{"bad rule action", `{"scope":{"rules":[{"action":"sometimes","chat_type":"direct"}]}}`, true},
-		{"bad chat type", `{"scope":{"rules":[{"action":"allow","chat_type":"everywhere"}]}}`, true},
+func TestMergeMemorySettings(t *testing.T) {
+	global := MemorySettings{
+		Provider:   "openai",
+		MaxResults: intPtr(6),
+		Citations:  "auto",
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseMemoryQmdSettings([]byte(tc.raw))
-			if (err != nil) != tc.wantErr {
-				t.Errorf("parseMemoryQmdSettings(%q) err=%v, wantErr=%v", tc.raw, err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestBuildMemoryConfig_Scope(t *testing.T) {
-	setupTestDB(t)
-	database.SetSetting("default_memory_backend", "qmd")
-
-	inst := nonLegacyInstance(t, "bot-scope1", "Scope1")
-	scopeJSON := `{"scope":{"default":"deny","rules":[{"action":"allow","chat_type":"direct"},{"action":"allow","chat_type":"channel"}]}}`
-	if err := database.DB.Model(&inst).Update("memory_qmd", scopeJSON).Error; err != nil {
-		t.Fatalf("seed override: %v", err)
-	}
-	database.DB.First(&inst, inst.ID)
-
-	cfg := buildMemoryConfig(&inst)
-	qmd, ok := cfg["qmd"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("qmd subtree missing: %#v", cfg)
-	}
-	scope, ok := qmd["scope"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("scope subtree missing: %#v", qmd)
-	}
-	if scope["default"] != "deny" {
-		t.Errorf("scope.default = %v, want deny", scope["default"])
-	}
-	rules, ok := scope["rules"].([]map[string]interface{})
-	if !ok || len(rules) != 2 {
-		t.Fatalf("scope.rules = %#v, want 2 entries", scope["rules"])
-	}
-	if rules[0]["action"] != "allow" {
-		t.Errorf("rules[0].action = %v", rules[0]["action"])
-	}
-	match0, ok := rules[0]["match"].(map[string]interface{})
-	if !ok || match0["chatType"] != "direct" {
-		t.Errorf("rules[0].match = %#v, want chatType direct", rules[0]["match"])
-	}
-	match1, ok := rules[1]["match"].(map[string]interface{})
-	if !ok || match1["chatType"] != "channel" {
-		t.Errorf("rules[1].match = %#v, want chatType channel", rules[1]["match"])
-	}
-}
-
-func TestMergeMemoryQmdSettings(t *testing.T) {
-	global := MemoryQmdSettings{
-		SearchMode:     "search",
-		UpdateInterval: "5m",
-		MaxResults:     intPtr(6),
-	}
-	override := MemoryQmdSettings{
-		SearchMode:      "query",
+	override := MemorySettings{
+		Provider:        "gemini",
 		SessionsEnabled: boolPtr(true),
 	}
-	got := mergeMemoryQmdSettings(global, override)
-	if got.SearchMode != "query" {
-		t.Errorf("SearchMode = %q, want override to win", got.SearchMode)
-	}
-	if got.UpdateInterval != "5m" {
-		t.Errorf("UpdateInterval = %q, want inherited 5m", got.UpdateInterval)
+	got := mergeMemorySettings(global, override)
+	if got.Provider != "gemini" {
+		t.Errorf("Provider = %q, want override to win", got.Provider)
 	}
 	if got.MaxResults == nil || *got.MaxResults != 6 {
 		t.Errorf("MaxResults = %v, want inherited 6", got.MaxResults)
+	}
+	if got.Citations != "auto" {
+		t.Errorf("Citations = %q, want inherited auto", got.Citations)
 	}
 	if got.SessionsEnabled == nil || !*got.SessionsEnabled {
 		t.Errorf("SessionsEnabled = %v, want override true", got.SessionsEnabled)
 	}
 }
 
-func TestBuildMemoryConfig_BuiltinDefault(t *testing.T) {
+func TestBuildMemoryConfig_Empty(t *testing.T) {
 	setupTestDB(t)
 	inst := nonLegacyInstance(t, "bot-mem1", "Mem1")
 
 	cfg := buildMemoryConfig(&inst)
-	want := map[string]interface{}{"backend": "builtin"}
-	if !reflect.DeepEqual(cfg, want) {
-		t.Errorf("cfg = %#v, want %#v", cfg, want)
+	if len(cfg) != 0 {
+		t.Errorf("cfg = %#v, want empty (leave OpenClaw's own memory defaults alone)", cfg)
 	}
 }
 
-func TestBuildMemoryConfig_QmdWithFoldersAndOverrides(t *testing.T) {
+func TestBuildMemoryConfig_GlobalAndOverride(t *testing.T) {
 	setupTestDB(t)
-	if err := database.DB.AutoMigrate(&database.SharedFolder{}); err != nil {
-		t.Fatalf("migrate shared_folders: %v", err)
-	}
-	database.SetSetting("default_memory_backend", "qmd")
-	database.SetSetting("default_memory_qmd", `{"search_mode":"search","max_results":6}`)
+	database.SetSetting("default_memory_settings", `{"provider":"openai","max_results":6,"citations":"auto"}`)
 
 	inst := nonLegacyInstance(t, "bot-mem2", "Mem2")
-	if err := database.DB.Model(&inst).Update("memory_qmd", `{"search_mode":"vsearch","advanced":{"limits":{"timeoutMs":9000}}}`).Error; err != nil {
+	if err := database.DB.Model(&inst).Update("memory_settings",
+		`{"provider":"gemini","min_score":0.4,"advanced":{"remote":{"baseUrl":"https://example.com"}}}`).Error; err != nil {
 		t.Fatalf("seed override: %v", err)
 	}
 	database.DB.First(&inst, inst.ID)
 
-	// One indexed folder attached directly, one attached but not indexed,
-	// one indexed but not attached.
-	mk := func(name, mount string, indexed bool, instanceIDs []uint) {
+	cfg := buildMemoryConfig(&inst)
+	if cfg["citations"] != "auto" {
+		t.Errorf("citations = %v, want inherited auto", cfg["citations"])
+	}
+	search, ok := cfg["search"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("search subtree missing: %#v", cfg)
+	}
+	if search["provider"] != "gemini" {
+		t.Errorf("provider = %v, want instance override gemini", search["provider"])
+	}
+	query, ok := search["query"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("query subtree missing: %#v", search)
+	}
+	if got := query["maxResults"]; got != 6 && got != float64(6) {
+		t.Errorf("query.maxResults = %v, want inherited 6", got)
+	}
+	if got := query["minScore"]; got != 0.4 {
+		t.Errorf("query.minScore = %v, want override 0.4", got)
+	}
+	remote, ok := search["remote"].(map[string]interface{})
+	if !ok || remote["baseUrl"] != "https://example.com" {
+		t.Errorf("remote = %#v, want advanced overlay baseUrl", search["remote"])
+	}
+}
+
+func TestBuildMemoryConfig_SessionsEnabledSources(t *testing.T) {
+	setupTestDB(t)
+	inst := nonLegacyInstance(t, "bot-mem3", "Mem3")
+	if err := database.DB.Model(&inst).Update("memory_settings", `{"sessions_enabled":true}`).Error; err != nil {
+		t.Fatalf("seed override: %v", err)
+	}
+	database.DB.First(&inst, inst.ID)
+
+	cfg := buildMemoryConfig(&inst)
+	search := cfg["search"].(map[string]interface{})
+	sources, ok := search["sources"].([]string)
+	if !ok || len(sources) != 2 || sources[0] != "memory" || sources[1] != "sessions" {
+		t.Errorf("sources = %#v, want [memory sessions]", search["sources"])
+	}
+}
+
+func TestBuildMemoryConfig_ExtraPathsFromIndexedFolders(t *testing.T) {
+	setupTestDB(t)
+	if err := database.DB.AutoMigrate(&database.SharedFolder{}); err != nil {
+		t.Fatalf("migrate shared_folders: %v", err)
+	}
+	inst := nonLegacyInstance(t, "bot-mem4", "Mem4")
+
+	mk := func(name, mount string, indexed bool, pattern string, instanceIDs []uint) {
 		t.Helper()
 		sf := database.SharedFolder{
-			Name:        name,
-			MountPath:   mount,
-			OwnerID:     1,
-			InstanceIDs: database.EncodeSharedFolderInstanceIDs(instanceIDs),
-			QmdIndex:    indexed,
-			QmdPattern:  "",
-		}
-		if name == "Team Docs" {
-			sf.QmdPattern = "**/*.{md,txt}"
+			Name:               name,
+			MountPath:          mount,
+			OwnerID:            1,
+			InstanceIDs:        database.EncodeSharedFolderInstanceIDs(instanceIDs),
+			MemoryIndex:        indexed,
+			MemoryIndexPattern: pattern,
 		}
 		if err := database.DB.Create(&sf).Error; err != nil {
 			t.Fatalf("create folder %s: %v", name, err)
 		}
 	}
-	mk("Team Docs", "/mnt/docs", true, []uint{inst.ID})
-	mk("Scratch", "/mnt/scratch", false, []uint{inst.ID})
-	mk("Elsewhere", "/mnt/other", true, []uint{inst.ID + 999})
+	mk("Team Docs", "/mnt/docs", true, "**/*.{md,txt}", []uint{inst.ID})
+	mk("Scratch", "/mnt/scratch", false, "", []uint{inst.ID})
+	mk("Elsewhere", "/mnt/other", true, "", []uint{inst.ID + 999})
+	mk("Whole Folder", "/mnt/whole", true, "", []uint{inst.ID})
 
 	cfg := buildMemoryConfig(&inst)
-	if cfg["backend"] != "qmd" {
-		t.Fatalf("backend = %v, want qmd", cfg["backend"])
-	}
-	qmd, ok := cfg["qmd"].(map[string]interface{})
+	search, ok := cfg["search"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("qmd subtree missing: %#v", cfg)
+		t.Fatalf("search subtree missing: %#v", cfg)
 	}
-	if qmd["searchMode"] != "vsearch" {
-		t.Errorf("searchMode = %v, want instance override vsearch", qmd["searchMode"])
+	extraPaths, ok := search["extraPaths"].([]interface{})
+	if !ok || len(extraPaths) != 2 {
+		t.Fatalf("extraPaths = %#v, want the two attached+indexed folders", search["extraPaths"])
 	}
-	limits, _ := qmd["limits"].(map[string]interface{})
-	if limits == nil {
-		t.Fatalf("limits missing: %#v", qmd)
+	// The patterned folder renders as a {path, pattern} object.
+	obj, ok := extraPaths[0].(map[string]interface{})
+	if !ok || obj["path"] != "/mnt/docs" || obj["pattern"] != "**/*.{md,txt}" {
+		t.Errorf("extraPaths[0] = %#v", extraPaths[0])
 	}
-	// maxResults comes from the global default; timeoutMs from the Advanced
-	// overlay, deep-merged into the same limits object.
-	if got := limits["maxResults"]; got != 6 && got != float64(6) {
-		t.Errorf("limits.maxResults = %v (%T), want 6", got, got)
-	}
-	if got := limits["timeoutMs"]; got != float64(9000) {
-		t.Errorf("limits.timeoutMs = %v, want 9000 from advanced overlay", got)
-	}
-	paths, _ := qmd["paths"].([]map[string]interface{})
-	if len(paths) != 1 {
-		t.Fatalf("paths = %#v, want exactly the one attached+indexed folder", qmd["paths"])
-	}
-	if paths[0]["path"] != "/mnt/docs" || paths[0]["pattern"] != "**/*.{md,txt}" {
-		t.Errorf("paths[0] = %#v", paths[0])
-	}
-	if name, _ := paths[0]["name"].(string); name == "" {
-		t.Errorf("paths[0].name empty, want a collection slug")
+	// The unpatterned folder renders as a bare path string.
+	if extraPaths[1] != "/mnt/whole" {
+		t.Errorf("extraPaths[1] = %#v, want bare path string", extraPaths[1])
 	}
 }
 
 func TestApplyMemoryConfig_ArgvAndRestart(t *testing.T) {
 	mock := &mockInstance{}
-	cfg := map[string]interface{}{"backend": "qmd", "qmd": map[string]interface{}{"searchMode": "search"}}
+	cfg := map[string]interface{}{"search": map[string]interface{}{"provider": "openai"}}
 	applyMemoryConfig(context.Background(), mock, "bot-x", cfg)
 
 	// One atomic set, no `config unset` — see applyMemoryConfig: unsetting is a
@@ -234,7 +202,8 @@ func TestApplyMemoryConfig_ArgvAndRestart(t *testing.T) {
 	if err := json.Unmarshal([]byte(mock.calls[0][3]), &pushed); err != nil {
 		t.Fatalf("payload not JSON: %v", err)
 	}
-	if pushed["backend"] != "qmd" {
+	search, ok := pushed["search"].(map[string]interface{})
+	if !ok || search["provider"] != "openai" {
 		t.Errorf("payload = %v", pushed)
 	}
 	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop"}) {
@@ -246,7 +215,7 @@ func TestApplyMemoryConfig_SetFailureSkipsRestart(t *testing.T) {
 	mock := &mockInstance{results: []callResult{
 		{code: 1, stderr: "invalid value"}, // the set fails
 	}}
-	applyMemoryConfig(context.Background(), mock, "bot-x", map[string]interface{}{"backend": "builtin"})
+	applyMemoryConfig(context.Background(), mock, "bot-x", map[string]interface{}{"citations": "on"})
 	if len(mock.calls) != 1 {
 		t.Fatalf("calls = %v, want only the failed set and no gateway restart", mock.calls)
 	}
@@ -257,44 +226,39 @@ func TestApplyMemoryConfig_SetFailureSkipsRestart(t *testing.T) {
 
 func TestSetInstanceMemory_UpdateAndClear(t *testing.T) {
 	setupTestDB(t)
-	inst := nonLegacyInstance(t, "bot-mem3", "Mem3")
+	inst := nonLegacyInstance(t, "bot-mem5", "Mem5")
 	user := createTestUser(t, "admin")
 
 	w := httptest.NewRecorder()
 	SetInstanceMemory(w, buildJSONRequest(t, "PATCH", "/api/v1/instances/{id}/memory", user,
 		map[string]string{"id": fmt.Sprintf("%d", inst.ID)},
-		`{"memory_backend":"qmd","qmd":{"search_mode":"query","max_results":10}}`))
+		`{"settings":{"provider":"gemini","max_results":10}}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d body=%s", w.Code, w.Body.String())
 	}
 	resp := parseResponse(t, w)
-	if resp["effective_backend"] != "qmd" || resp["memory_backend"] != "qmd" {
-		t.Errorf("resp = %v", resp)
+	settings, ok := resp["settings"].(map[string]interface{})
+	if !ok || settings["provider"] != "gemini" {
+		t.Errorf("resp.settings = %v", resp["settings"])
 	}
 
 	var row database.Instance
 	database.DB.First(&row, inst.ID)
-	if row.MemoryBackend != "qmd" {
-		t.Errorf("MemoryBackend = %q", row.MemoryBackend)
-	}
-	saved := loadMemoryQmdSettings(row.MemoryQmd)
-	if saved.SearchMode != "query" || saved.MaxResults == nil || *saved.MaxResults != 10 {
-		t.Errorf("MemoryQmd = %q", row.MemoryQmd)
+	saved := loadMemorySettings(row.MemorySettings)
+	if saved.Provider != "gemini" || saved.MaxResults == nil || *saved.MaxResults != 10 {
+		t.Errorf("MemorySettings = %q", row.MemorySettings)
 	}
 
-	// Clearing the override returns the instance to the global default.
+	// Clearing the override returns the instance to the global default (empty object).
 	w = httptest.NewRecorder()
 	SetInstanceMemory(w, buildJSONRequest(t, "PATCH", "/api/v1/instances/{id}/memory", user,
-		map[string]string{"id": fmt.Sprintf("%d", inst.ID)}, `{"memory_backend":"","qmd":{}}`))
+		map[string]string{"id": fmt.Sprintf("%d", inst.ID)}, `{"settings":{}}`))
 	if w.Code != http.StatusOK {
 		t.Fatalf("clear: status %d body=%s", w.Code, w.Body.String())
 	}
 	database.DB.First(&row, inst.ID)
-	if row.MemoryBackend != "" {
-		t.Errorf("MemoryBackend = %q after clear, want \"\"", row.MemoryBackend)
-	}
-	if got := parseResponse(t, w)["effective_backend"]; got != "builtin" {
-		t.Errorf("effective_backend = %v after clear, want builtin", got)
+	if loadMemorySettings(row.MemorySettings).Provider != "" {
+		t.Errorf("Provider = %q after clear, want \"\"", loadMemorySettings(row.MemorySettings).Provider)
 	}
 }
 
@@ -302,21 +266,13 @@ func TestSetInstanceMemory_Rejections(t *testing.T) {
 	setupTestDB(t)
 	user := createTestUser(t, "admin")
 
-	// Invalid backend value.
-	inst := nonLegacyInstance(t, "bot-mem4", "Mem4")
+	// Invalid settings value.
+	inst := nonLegacyInstance(t, "bot-mem6", "Mem6")
 	w := httptest.NewRecorder()
 	SetInstanceMemory(w, buildJSONRequest(t, "PATCH", "/api/v1/instances/{id}/memory", user,
-		map[string]string{"id": fmt.Sprintf("%d", inst.ID)}, `{"memory_backend":"redis"}`))
+		map[string]string{"id": fmt.Sprintf("%d", inst.ID)}, `{"settings":{"citations":"nope"}}`))
 	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid backend: status %d, want 400", w.Code)
-	}
-
-	// Invalid qmd settings.
-	w = httptest.NewRecorder()
-	SetInstanceMemory(w, buildJSONRequest(t, "PATCH", "/api/v1/instances/{id}/memory", user,
-		map[string]string{"id": fmt.Sprintf("%d", inst.ID)}, `{"qmd":{"search_mode":"nope"}}`))
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid qmd: status %d, want 400", w.Code)
+		t.Errorf("invalid citations: status %d, want 400", w.Code)
 	}
 
 	// Empty body.
@@ -328,10 +284,10 @@ func TestSetInstanceMemory_Rejections(t *testing.T) {
 	}
 
 	// Legacy embedded instances are rejected.
-	legacy := createTestInstance(t, "bot-mem5", "Mem5")
+	legacy := createTestInstance(t, "bot-mem7", "Mem7")
 	w = httptest.NewRecorder()
 	SetInstanceMemory(w, buildJSONRequest(t, "PATCH", "/api/v1/instances/{id}/memory", user,
-		map[string]string{"id": fmt.Sprintf("%d", legacy.ID)}, `{"memory_backend":"qmd"}`))
+		map[string]string{"id": fmt.Sprintf("%d", legacy.ID)}, `{"settings":{"provider":"openai"}}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("legacy: status %d, want 400", w.Code)
 	}
@@ -342,14 +298,14 @@ func TestGetInstanceMemory_IndexedFolders(t *testing.T) {
 	if err := database.DB.AutoMigrate(&database.SharedFolder{}); err != nil {
 		t.Fatalf("migrate shared_folders: %v", err)
 	}
-	inst := nonLegacyInstance(t, "bot-mem6", "Mem6")
+	inst := nonLegacyInstance(t, "bot-mem8", "Mem8")
 	user := createTestUser(t, "admin")
 	sf := database.SharedFolder{
 		Name:        "Docs",
 		MountPath:   "/mnt/docs",
 		OwnerID:     user.ID,
 		InstanceIDs: database.EncodeSharedFolderInstanceIDs([]uint{inst.ID}),
-		QmdIndex:    true,
+		MemoryIndex: true,
 	}
 	if err := database.DB.Create(&sf).Error; err != nil {
 		t.Fatalf("create folder: %v", err)
@@ -367,20 +323,19 @@ func TestGetInstanceMemory_IndexedFolders(t *testing.T) {
 		t.Fatalf("indexed_folders = %v, want 1", resp["indexed_folders"])
 	}
 	f := folders[0].(map[string]interface{})
-	if f["mount_path"] != "/mnt/docs" || f["pattern"] != "**/*.md" {
+	if f["mount_path"] != "/mnt/docs" {
 		t.Errorf("folder = %v", f)
 	}
 }
 
 // TestCloneInstance_CopiesMemoryOverride mirrors the browser_enabled clone
-// test: the memory backend override must carry over.
+// test: the memory settings override must carry over.
 func TestCloneInstance_CopiesMemoryOverride(t *testing.T) {
 	cloneSetup(t)
 
-	src := nonLegacyInstance(t, "bot-mem7", "Mem7")
+	src := nonLegacyInstance(t, "bot-mem9", "Mem9")
 	if err := database.DB.Model(&src).Updates(map[string]interface{}{
-		"memory_backend": "qmd",
-		"memory_qmd":     `{"search_mode":"query"}`,
+		"memory_settings": `{"provider":"gemini"}`,
 	}).Error; err != nil {
 		t.Fatalf("seed src: %v", err)
 	}
@@ -397,10 +352,7 @@ func TestCloneInstance_CopiesMemoryOverride(t *testing.T) {
 	if err := database.DB.First(&dst, dstID).Error; err != nil {
 		t.Fatalf("load dst: %v", err)
 	}
-	if dst.MemoryBackend != "qmd" {
-		t.Errorf("MemoryBackend = %q on clone, want qmd", dst.MemoryBackend)
-	}
-	if loadMemoryQmdSettings(dst.MemoryQmd).SearchMode != "query" {
-		t.Errorf("MemoryQmd = %q on clone", dst.MemoryQmd)
+	if loadMemorySettings(dst.MemorySettings).Provider != "gemini" {
+		t.Errorf("MemorySettings = %q on clone, want provider gemini", dst.MemorySettings)
 	}
 }

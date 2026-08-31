@@ -91,7 +91,7 @@ agent-test-instance:
 	cd agent/tests && AGENT_INSTANCE_TEST_IMAGE=$(AGENT_IMAGE):$(TAG) npm run test
 
 # Browser-only test run: only the three browser vars are set, so
-# global-setup.ts launches no instance container. openclaw/cron/qmd/env-var
+# global-setup.ts launches no instance container. openclaw/cron/env-var
 # suites that key off containers.agent see no container and skip
 # themselves; only browser.test.ts actually runs. Used by the separate,
 # manually-triggered agent-browser pipeline.

@@ -50,8 +50,8 @@ jobs:
           CACHE_ARGS: --cache-from type=gha,scope=agent-instance-amd64 --cache-to type=gha,mode=max,scope=agent-instance-amd64
 
       # No browser containers are launched here, so the browser test
-      # suite skips itself and this only exercises openclaw/cron/qmd/
-      # env-var checks against the instance image.
+      # suite skips itself and this only exercises openclaw/cron/env-var
+      # checks against the instance image.
       - name: Run agent instance test suite
         run: |
           make agent-test-instance \

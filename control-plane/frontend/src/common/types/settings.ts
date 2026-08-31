@@ -29,12 +29,10 @@ export interface Settings {
   /** Global ServiceAccount annotations + exposed ports defaults (Kubernetes only). */
   default_service_account_annotations: Record<string, string>;
   default_ports: import("./instance").PortSpec[];
-  /** Default OpenClaw memory backend for agents without an override. */
-  default_memory_backend: "builtin" | "qmd";
   /** Default web-search provider for agents without an override. "" = leave OpenClaw's own auto-detection alone. */
   default_search_provider: "" | "brave";
-  /** Global QMD memory defaults, merged under per-agent overrides. */
-  default_memory_qmd: import("./instance").MemoryQmdSettings;
+  /** Global builtin memory defaults, merged under per-agent overrides. */
+  default_memory_settings: import("./instance").MemorySettings;
   /** Default OpenClaw context engine for agents without an override. "" resolves to "legacy". */
   default_context_engine: "" | "legacy" | "lossless-claw";
   /** Global lossless-claw settings defaults, merged under per-agent overrides. */
@@ -82,8 +80,7 @@ export interface SettingsUpdatePayload {
   default_affinity?: string;
   default_service_account_annotations?: Record<string, string>;
   default_ports?: import("./instance").PortSpec[];
-  default_memory_backend?: "builtin" | "qmd";
-  default_memory_qmd?: import("./instance").MemoryQmdSettings;
+  default_memory_settings?: import("./instance").MemorySettings;
   default_search_provider?: "" | "brave";
   default_context_engine?: "" | "legacy" | "lossless-claw";
   default_context_engine_settings?: import("./instance").LosslessClawSettings;

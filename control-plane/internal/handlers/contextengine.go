@@ -70,7 +70,7 @@ type LosslessClawFallbackProvider struct {
 // hatch for everything else. Stored as JSON both in the
 // default_context_engine_settings setting (global defaults) and in
 // Instance.ContextEngineSettings (per-instance override). Mirrors
-// MemoryQmdSettings's pointer/omitempty pattern so "not set — inherit" is
+// MemorySettings's pointer/omitempty pattern so "not set — inherit" is
 // distinguishable from an explicit value.
 type LosslessClawSettings struct {
 	// ContextThreshold maps to contextThreshold: fraction of the context
@@ -118,7 +118,7 @@ type LosslessClawSettings struct {
 // parseLosslessClawSettings unmarshals and validates a LosslessClawSettings
 // JSON object. Unknown top-level keys are rejected so typos surface at save
 // time instead of silently doing nothing, mirroring
-// parseMemoryQmdSettings.
+// parseMemorySettings.
 func parseLosslessClawSettings(raw []byte) (LosslessClawSettings, error) {
 	var s LosslessClawSettings
 	if len(raw) == 0 || string(raw) == "null" {
@@ -172,7 +172,7 @@ func loadLosslessClawSettings(raw string) LosslessClawSettings {
 
 // mergeLosslessClawSettings overlays the per-instance override on the global
 // defaults, field by field. Set fields win; unset fields inherit. Mirrors
-// mergeMemoryQmdSettings.
+// mergeMemorySettings.
 func mergeLosslessClawSettings(global, override LosslessClawSettings) LosslessClawSettings {
 	out := global
 	if override.ContextThreshold != nil {

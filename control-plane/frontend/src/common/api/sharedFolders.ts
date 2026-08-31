@@ -6,10 +6,11 @@ export interface SharedFolder {
   mount_path: string;
   host_path: string;
   read_only: boolean;
-  /** Include this folder in attached agents' QMD memory index. */
-  qmd_index: boolean;
-  /** Glob within the folder; "" = QMD's default ("**\/*.md"). */
-  qmd_pattern: string;
+  /** Include this folder in attached agents' builtin memory index
+   * (memory.search.extraPaths). */
+  memory_index: boolean;
+  /** Root-relative glob narrowing the folder; "" indexes the whole folder. */
+  memory_index_pattern: string;
   owner_id: number;
   instance_ids: number[];
   team_ids: number[];
@@ -36,8 +37,8 @@ export async function createSharedFolder(data: {
   mount_path: string;
   host_path?: string;
   read_only?: boolean;
-  qmd_index?: boolean;
-  qmd_pattern?: string;
+  memory_index?: boolean;
+  memory_index_pattern?: string;
 }): Promise<SharedFolder> {
   const res = await client.post("/shared-folders", data);
   return res.data;
@@ -54,8 +55,8 @@ export async function updateSharedFolder(
     name?: string;
     mount_path?: string;
     read_only?: boolean;
-    qmd_index?: boolean;
-    qmd_pattern?: string;
+    memory_index?: boolean;
+    memory_index_pattern?: string;
     instance_ids?: number[];
     team_ids?: number[];
   },

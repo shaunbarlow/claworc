@@ -1,85 +1,71 @@
 import { useMemo, useState } from "react";
-import type { IndexedFolder, MemoryQmdScope, MemoryQmdSettings } from "@common/types/instance";
+import type { IndexedFolder, MemorySettings } from "@common/types/instance";
 
-/** Canonical scope shapes the simple toggle understands. Anything else
- * (custom per-channel rules, etc.) falls through to the Advanced JSON
- * escape hatch instead of this control. */
-const SCOPE_DIRECT_ONLY: MemoryQmdScope = {
-  default: "deny",
-  rules: [{ action: "allow", chat_type: "direct" }],
-};
-const SCOPE_ALL_CHATS: MemoryQmdScope = {
-  default: "deny",
-  rules: [
-    { action: "allow", chat_type: "direct" },
-    { action: "allow", chat_type: "group" },
-    { action: "allow", chat_type: "channel" },
-  ],
-};
+/** Curated dropdown of embedding providers OpenClaw's builtin memory engine
+ * ships with (see /reference/memory-config). Anything else (a custom
+ * `models.providers.<id>` reference) still round-trips via the Advanced
+ * JSON field or by typing it directly if a free-text override is added
+ * later — this list only covers the common case. */
+const PROVIDER_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Auto (OpenAI if configured, else FTS-only)" },
+  { value: "openai", label: "OpenAI" },
+  { value: "gemini", label: "Gemini" },
+  { value: "bedrock", label: "Bedrock" },
+  { value: "deepinfra", label: "DeepInfra" },
+  { value: "mistral", label: "Mistral" },
+  { value: "voyage", label: "Voyage" },
+  { value: "ollama", label: "Ollama (local/self-hosted)" },
+  { value: "lmstudio", label: "LM Studio (local/self-hosted)" },
+  { value: "local", label: "Local (managed llama.cpp)" },
+  { value: "openai-compatible", label: "OpenAI-compatible endpoint" },
+  { value: "none", label: "None (FTS keyword search only)" },
+];
 
-function scopeToggleState(scope: MemoryQmdScope | undefined): "" | "true" | "false" {
-  if (!scope) return "";
-  const json = JSON.stringify(scope);
-  if (json === JSON.stringify(SCOPE_ALL_CHATS)) return "true";
-  if (json === JSON.stringify(SCOPE_DIRECT_ONLY)) return "false";
-  return "";
-}
-
-export interface MemoryBackendOption {
-  value: "" | "builtin" | "qmd";
-  label: string;
-}
-
-interface Props {
+export interface Props {
   title: string;
   description: string;
-  backend: "" | "builtin" | "qmd";
-  backendOptions: MemoryBackendOption[];
-  qmd: MemoryQmdSettings;
+  settings: MemorySettings;
   /** Resolved values shown as placeholders when a field is unset (agent page). */
-  effectiveQmd?: MemoryQmdSettings;
-  /** Shared folders feeding the QMD index (agent page). */
+  effectiveSettings?: MemorySettings;
+  /** Shared folders feeding the memory index (agent page). */
   indexedFolders?: IndexedFolder[];
-  /** Backend that applies when the "" (inherit) option is selected. */
-  inheritBackend?: "builtin" | "qmd";
   /** Shown under the Save button, e.g. the gateway-restart warning. */
   footnote?: string;
-  onSave: (backend: "" | "builtin" | "qmd", qmd: MemoryQmdSettings) => Promise<void>;
+  onSave: (settings: MemorySettings) => Promise<void>;
   isSaving: boolean;
 }
 
 const inputCls =
   "w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
 
-/** Card editing the OpenClaw memory backend selection plus the curated QMD
- * knobs and the advanced-JSON escape hatch. Self-contained save, following
- * the SimpleKVEditor/PortsEditor pattern. */
+/** Card editing OpenClaw's builtin memory.search.* config (embedding
+ * provider, query limits, citations, session-transcript indexing) plus the
+ * advanced-JSON escape hatch. Self-contained save, following the
+ * SimpleKVEditor/PortsEditor pattern. */
 export default function MemorySettingsEditor({
   title,
   description,
-  backend,
-  backendOptions,
-  qmd,
-  effectiveQmd,
+  settings,
+  effectiveSettings,
   indexedFolders,
-  inheritBackend,
   footnote,
   onSave,
   isSaving,
 }: Props) {
-  const [draftBackend, setDraftBackend] = useState<"" | "builtin" | "qmd">(backend);
-  const [searchMode, setSearchMode] = useState(qmd.search_mode ?? "");
-  const [updateInterval, setUpdateInterval] = useState(qmd.update_interval ?? "");
-  const [maxResults, setMaxResults] = useState(qmd.max_results != null ? String(qmd.max_results) : "");
+  const [provider, setProvider] = useState(settings.provider ?? "");
+  const [model, setModel] = useState(settings.model ?? "");
+  const [fallback, setFallback] = useState(settings.fallback ?? "");
+  const [maxResults, setMaxResults] = useState(settings.max_results != null ? String(settings.max_results) : "");
+  const [minScore, setMinScore] = useState(settings.min_score != null ? String(settings.min_score) : "");
+  const [citations, setCitations] = useState<"" | "auto" | "on" | "off">(settings.citations ?? "");
+  const [rememberAcrossConversations, setRememberAcrossConversations] = useState<"" | "true" | "false">(
+    settings.remember_across_conversations == null ? "" : settings.remember_across_conversations ? "true" : "false",
+  );
   const [sessionsEnabled, setSessionsEnabled] = useState<"" | "true" | "false">(
-    qmd.sessions_enabled == null ? "" : qmd.sessions_enabled ? "true" : "false",
+    settings.sessions_enabled == null ? "" : settings.sessions_enabled ? "true" : "false",
   );
-  const [includeDefaultMemory, setIncludeDefaultMemory] = useState<"" | "true" | "false">(
-    qmd.include_default_memory == null ? "" : qmd.include_default_memory ? "true" : "false",
-  );
-  const [groupChatMemory, setGroupChatMemory] = useState<"" | "true" | "false">(scopeToggleState(qmd.scope));
   const [advanced, setAdvanced] = useState(
-    qmd.advanced && Object.keys(qmd.advanced).length > 0 ? JSON.stringify(qmd.advanced, null, 2) : "",
+    settings.advanced && Object.keys(settings.advanced).length > 0 ? JSON.stringify(settings.advanced, null, 2) : "",
   );
   const [advancedOpen, setAdvancedOpen] = useState(!!advanced);
 
@@ -96,49 +82,52 @@ export default function MemorySettingsEditor({
     }
   }, [advanced]);
 
-  const intervalError =
-    updateInterval && !/^\d+(ms|s|m|h)$/.test(updateInterval)
-      ? 'Use a duration like "30s", "5m" or "1h"'
+  const maxResultsError =
+    maxResults && (!/^\d+$/.test(maxResults) || Number(maxResults) < 1 || Number(maxResults) > 100)
+      ? "Must be a whole number between 1 and 100"
+      : null;
+  const minScoreError =
+    minScore && (Number.isNaN(Number(minScore)) || Number(minScore) < 0 || Number(minScore) > 1)
+      ? "Must be a number between 0 and 1"
       : null;
 
-  const buildQmd = (): MemoryQmdSettings => {
-    const out: MemoryQmdSettings = {};
-    if (searchMode) out.search_mode = searchMode as MemoryQmdSettings["search_mode"];
-    if (updateInterval) out.update_interval = updateInterval;
-    if (maxResults) out.max_results = Number(maxResults);
+  const buildSettings = (): MemorySettings => {
+    const out: MemorySettings = {};
+    if (provider) out.provider = provider;
+    if (model.trim()) out.model = model.trim();
+    if (fallback) out.fallback = fallback;
+    if (maxResults && !maxResultsError) out.max_results = Number(maxResults);
+    if (minScore && !minScoreError) out.min_score = Number(minScore);
+    if (citations) out.citations = citations;
+    if (rememberAcrossConversations) out.remember_across_conversations = rememberAcrossConversations === "true";
     if (sessionsEnabled) out.sessions_enabled = sessionsEnabled === "true";
-    if (includeDefaultMemory) out.include_default_memory = includeDefaultMemory === "true";
-    if (groupChatMemory === "true") out.scope = SCOPE_ALL_CHATS;
-    if (groupChatMemory === "false") out.scope = SCOPE_DIRECT_ONLY;
     if (advanced.trim() && !advancedError) out.advanced = JSON.parse(advanced);
     return out;
   };
 
   const dirty = useMemo(() => {
-    const current = JSON.stringify({ b: backend, q: qmd });
+    const current = JSON.stringify(settings);
     try {
-      return current !== JSON.stringify({ b: draftBackend, q: buildQmd() });
+      return current !== JSON.stringify(buildSettings());
     } catch {
       return true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    backend,
-    qmd,
-    draftBackend,
-    searchMode,
-    updateInterval,
+    settings,
+    provider,
+    model,
+    fallback,
     maxResults,
+    minScore,
+    citations,
+    rememberAcrossConversations,
     sessionsEnabled,
-    includeDefaultMemory,
-    groupChatMemory,
     advanced,
     advancedError,
   ]);
 
-  const canSave = dirty && !isSaving && !advancedError && !intervalError;
-  const effectiveDraftBackend = draftBackend === "" ? (inheritBackend ?? "builtin") : draftBackend;
-  const qmdVisible = effectiveDraftBackend === "qmd";
+  const canSave = dirty && !isSaving && !advancedError && !maxResultsError && !minScoreError;
 
   const triState = (
     label: string,
@@ -161,155 +150,156 @@ export default function MemorySettingsEditor({
       <h3 className="text-sm font-medium text-gray-900 mb-1">{title}</h3>
       <p className="text-xs text-gray-500 mb-4">{description}</p>
       <div className="space-y-4">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Backend</label>
-          <select
-            value={draftBackend}
-            onChange={(e) => setDraftBackend(e.target.value as "" | "builtin" | "qmd")}
-            className={inputCls}
-          >
-            {backendOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Embedding Provider</label>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputCls}>
+              {PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {effectiveSettings?.provider && o.value === "" ? `Inherit (${effectiveSettings.provider})` : o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Model Override</label>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={effectiveSettings?.model ?? "Provider default"}
+              className={inputCls}
+            />
+          </div>
         </div>
 
-        {qmdVisible && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Search Mode</label>
-                <select value={searchMode} onChange={(e) => setSearchMode(e.target.value)} className={inputCls}>
-                  <option value="">
-                    {effectiveQmd?.search_mode ? `Inherit (${effectiveQmd.search_mode})` : "Default (search)"}
-                  </option>
-                  <option value="search">search — BM25, fastest</option>
-                  <option value="vsearch">vsearch — vector similarity</option>
-                  <option value="query">query — full rerank, slow on CPU</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Reindex Interval</label>
-                <input
-                  type="text"
-                  value={updateInterval}
-                  onChange={(e) => setUpdateInterval(e.target.value)}
-                  placeholder={effectiveQmd?.update_interval ?? "5m"}
-                  className={inputCls}
-                />
-                {intervalError && <p className="mt-1 text-xs text-red-600">{intervalError}</p>}
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Max Results</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={maxResults}
-                  onChange={(e) => setMaxResults(e.target.value)}
-                  placeholder={effectiveQmd?.max_results != null ? String(effectiveQmd.max_results) : "6"}
-                  className={inputCls}
-                />
-              </div>
-              {triState(
-                "Index Sessions",
-                sessionsEnabled,
-                setSessionsEnabled,
-                effectiveQmd?.sessions_enabled != null
-                  ? `Inherit (${effectiveQmd.sessions_enabled ? "enabled" : "disabled"})`
-                  : "Default (disabled)",
-              )}
-              {triState(
-                "Workspace Memory",
-                includeDefaultMemory,
-                setIncludeDefaultMemory,
-                effectiveQmd?.include_default_memory != null
-                  ? `Inherit (${effectiveQmd.include_default_memory ? "enabled" : "disabled"})`
-                  : "Default (enabled)",
-              )}
-            </div>
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                {triState(
-                  "Group/Channel Memory Search",
-                  groupChatMemory,
-                  setGroupChatMemory,
-                  (() => {
-                    const state = scopeToggleState(effectiveQmd?.scope);
-                    if (state === "true") return "Inherit (all chat types)";
-                    if (state === "false") return "Inherit (direct chats only)";
-                    return "Default (direct chats only)";
-                  })(),
-                )}
-                <p className="mt-1 text-xs text-gray-500">
-                  OpenClaw only surfaces QMD results in direct chats by default. Enable to also allow
-                  results in group chats and channels (e.g. Discord). Custom per-channel rules need the
-                  Advanced JSON field below instead.
-                </p>
-              </div>
-            </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Fallback Provider</label>
+            <select value={fallback} onChange={(e) => setFallback(e.target.value)} className={inputCls}>
+              <option value="">{effectiveSettings?.fallback ? `Inherit (${effectiveSettings.fallback})` : "None"}</option>
+              {PROVIDER_OPTIONS.filter((o) => o.value && o.value !== "none").map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Max Results</label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={maxResults}
+              onChange={(e) => setMaxResults(e.target.value)}
+              placeholder={effectiveSettings?.max_results != null ? String(effectiveSettings.max_results) : "6"}
+              className={inputCls}
+            />
+            {maxResultsError && <p className="mt-1 text-xs text-red-600">{maxResultsError}</p>}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Min Score</label>
+            <input
+              type="text"
+              value={minScore}
+              onChange={(e) => setMinScore(e.target.value)}
+              placeholder={effectiveSettings?.min_score != null ? String(effectiveSettings.min_score) : "0.0-1.0"}
+              className={inputCls}
+            />
+            {minScoreError && <p className="mt-1 text-xs text-red-600">{minScoreError}</p>}
+          </div>
+        </div>
 
-            {indexedFolders !== undefined && (
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Indexed Shared Folders</label>
-                {indexedFolders.length === 0 ? (
-                  <p className="text-xs text-gray-400">
-                    None. Enable "Include in memory index" on a shared folder attached to this agent.
-                  </p>
-                ) : (
-                  <ul className="text-xs text-gray-700 space-y-1">
-                    {indexedFolders.map((f) => (
-                      <li key={f.id} className="flex items-center gap-2">
-                        <span className="font-medium">{f.name}</span>
-                        <span className="text-gray-400 font-mono">
-                          {f.mount_path}/{f.pattern}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Citations</label>
+            <select value={citations} onChange={(e) => setCitations(e.target.value as "" | "auto" | "on" | "off")} className={inputCls}>
+              <option value="">{effectiveSettings?.citations ? `Inherit (${effectiveSettings.citations})` : "Default (auto)"}</option>
+              <option value="auto">Auto — include when useful</option>
+              <option value="on">Always on</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+          {triState(
+            "Cross-Conversation Recall",
+            rememberAcrossConversations,
+            setRememberAcrossConversations,
+            effectiveSettings?.remember_across_conversations != null
+              ? `Inherit (${effectiveSettings.remember_across_conversations ? "enabled" : "disabled"})`
+              : "Default",
+          )}
+          {triState(
+            "Index Session Transcripts",
+            sessionsEnabled,
+            setSessionsEnabled,
+            effectiveSettings?.sessions_enabled != null
+              ? `Inherit (${effectiveSettings.sessions_enabled ? "enabled" : "disabled"})`
+              : "Default (disabled)",
+          )}
+        </div>
+        <p className="text-xs text-gray-500">
+          Cross-Conversation Recall lets this agent recall context from its own other recognized private
+          conversations (implies session indexing). Index Session Transcripts alone just makes past sessions
+          searchable via <code>memory_search</code> without that broader recall.
+        </p>
+
+        {indexedFolders !== undefined && (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Indexed Shared Folders</label>
+            {indexedFolders.length === 0 ? (
+              <p className="text-xs text-gray-400">
+                None. Enable "Include in memory index" on a shared folder attached to this agent.
+              </p>
+            ) : (
+              <ul className="text-xs text-gray-700 space-y-1">
+                {indexedFolders.map((f) => (
+                  <li key={f.id} className="flex items-center gap-2">
+                    <span className="font-medium">{f.name}</span>
+                    <span className="text-gray-400 font-mono">
+                      {f.mount_path}
+                      {f.pattern ? `/${f.pattern}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
-
-            <div>
-              <button
-                type="button"
-                onClick={() => setAdvancedOpen((v) => !v)}
-                className="text-xs text-blue-600 hover:text-blue-800"
-              >
-                {advancedOpen ? "Hide advanced config" : "Advanced config (JSON)"}
-              </button>
-              {advancedOpen && (
-                <div className="mt-2">
-                  <textarea
-                    value={advanced}
-                    onChange={(e) => setAdvanced(e.target.value)}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder='{"limits": {"timeoutMs": 8000}}'
-                    className={`${inputCls} font-mono`}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">
-                    Merged into OpenClaw's <code>memory.qmd</code> config last — any option Claworc doesn't model
-                    (scope rules, timeouts, debounce) goes here.
-                  </p>
-                  {advancedError && <p className="mt-1 text-xs text-red-600">{advancedError}</p>}
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
+
+        <div>
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="text-xs text-blue-600 hover:text-blue-800"
+          >
+            {advancedOpen ? "Hide advanced config" : "Advanced config (JSON)"}
+          </button>
+          {advancedOpen && (
+            <div className="mt-2">
+              <textarea
+                value={advanced}
+                onChange={(e) => setAdvanced(e.target.value)}
+                rows={5}
+                spellCheck={false}
+                placeholder='{"multimodal": {"enabled": true, "modalities": ["image"]}}'
+                className={`${inputCls} font-mono`}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Merged into OpenClaw's <code>memory.search</code> config last — any option Claworc doesn't model
+                (multimodal, remote endpoint/headers, store.vector, cache, input-type labels) goes here.
+              </p>
+              {advancedError && <p className="mt-1 text-xs text-red-600">{advancedError}</p>}
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center justify-between pt-1">
           <span className="text-xs text-amber-600">{footnote ?? ""}</span>
           <button
             type="button"
             disabled={!canSave}
-            onClick={() => onSave(draftBackend, buildQmd())}
+            onClick={() => onSave(buildSettings())}
             className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? "Saving..." : "Save"}

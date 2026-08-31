@@ -277,7 +277,7 @@ export default function AgentDetailPage() {
     },
   });
 
-  // Memory backend (builtin/QMD) — fetched lazily on the settings tab.
+  // Builtin memory settings — fetched lazily on the settings tab.
   // NOTE: hooks must stay above the early returns below (see commit 0c1a9ab).
   const { data: instanceMemory } = useQuery({
     queryKey: ["instances", instanceId, "memory"],
@@ -1015,25 +1015,18 @@ export default function AgentDetailPage() {
             </div>
           </div>
 
-          {/* Memory backend card (builtin/QMD) — non-legacy agents only */}
+          {/* Builtin memory card — non-legacy agents only */}
           {!instance.is_legacy_embedded && instanceMemory && (
             <MemorySettingsEditor
-              key={`mem-${JSON.stringify(instanceMemory.memory_backend)}-${JSON.stringify(instanceMemory.qmd)}`}
+              key={`mem-${JSON.stringify(instanceMemory.settings)}`}
               title="Memory"
-              description={`OpenClaw memory backend for this agent. "Inherit" follows the global default (currently ${instanceMemory.default_backend}). Unset QMD fields inherit the global defaults.`}
-              backend={instanceMemory.memory_backend}
-              backendOptions={[
-                { value: "", label: `Inherit (${instanceMemory.default_backend})` },
-                { value: "builtin", label: "Builtin (OpenClaw default)" },
-                { value: "qmd", label: "QMD (local hybrid search)" },
-              ]}
-              qmd={instanceMemory.qmd}
-              effectiveQmd={instanceMemory.effective_qmd}
+              description="OpenClaw builtin memory for this agent. Unset fields inherit the global defaults."
+              settings={instanceMemory.settings}
+              effectiveSettings={instanceMemory.effective_settings}
               indexedFolders={instanceMemory.indexed_folders}
-              inheritBackend={instanceMemory.default_backend}
               footnote="Saving restarts the openclaw-gateway service."
-              onSave={async (backend, qmd) => {
-                await memoryMutation.mutateAsync({ memory_backend: backend, qmd });
+              onSave={async (settings) => {
+                await memoryMutation.mutateAsync({ settings });
               }}
               isSaving={memoryMutation.isPending}
             />

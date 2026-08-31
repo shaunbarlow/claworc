@@ -74,7 +74,7 @@ jobs:
           CACHE_ARGS: --cache-from type=gha,scope=agent-brave --cache-to type=gha,mode=max,scope=agent-brave
 
       # Browser-only test run — no instance container is launched, so the
-      # openclaw/cron/qmd/env-var suites skip themselves and this only
+      # openclaw/cron/env-var suites skip themselves and this only
       # exercises browser.test.ts (CDP + browser process checks) against
       # the three browser images.
       - name: Run agent browser test suite

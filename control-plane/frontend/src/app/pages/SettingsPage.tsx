@@ -535,13 +535,9 @@ function EnvironmentTab({
   const handleSaveGlobalPorts = async (next: import("@common/types/instance").PortSpec[]) => {
     await placementMutation.mutateAsync({ default_ports: next });
   };
-  const handleSaveMemoryDefaults = async (
-    backend: "" | "builtin" | "qmd",
-    qmd: import("@common/types/instance").MemoryQmdSettings,
-  ) => {
+  const handleSaveMemoryDefaults = async (settings: import("@common/types/instance").MemorySettings) => {
     await placementMutation.mutateAsync({
-      default_memory_backend: backend === "" ? "builtin" : backend,
-      default_memory_qmd: qmd,
+      default_memory_settings: settings,
     });
   };
   const handleSaveContextEngineDefaults = async (
@@ -683,15 +679,10 @@ function EnvironmentTab({
       </div>
 
       <MemorySettingsEditor
-        key={`mem-${JSON.stringify(settings.default_memory_backend)}-${JSON.stringify(settings.default_memory_qmd)}`}
+        key={`mem-${JSON.stringify(settings.default_memory_settings)}`}
         title="Memory Defaults"
-        description="OpenClaw memory backend for agents without a per-agent override. QMD is a local-first hybrid search sidecar; the builtin backend is OpenClaw's stock SQLite index."
-        backend={settings.default_memory_backend === "qmd" ? "qmd" : "builtin"}
-        backendOptions={[
-          { value: "builtin", label: "Builtin (OpenClaw default)" },
-          { value: "qmd", label: "QMD (local hybrid search)" },
-        ]}
-        qmd={settings.default_memory_qmd ?? {}}
+        description="OpenClaw builtin memory (embedding provider, search knobs, citations) for agents without a per-agent override."
+        settings={settings.default_memory_settings ?? {}}
         footnote="Saving restarts the openclaw-gateway service on every running agent."
         onSave={handleSaveMemoryDefaults}
         isSaving={placementMutation.isPending}

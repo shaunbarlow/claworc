@@ -78,7 +78,7 @@ func TestParseLosslessClawSettingsValidation(t *testing.T) {
 }
 
 // mergeLosslessClawSettings: set fields win over the global default; unset
-// fields inherit — same contract as mergeMemoryQmdSettings.
+// fields inherit — same contract as mergeMemorySettings.
 func TestMergeLosslessClawSettings(t *testing.T) {
 	threshold := 0.9
 	globalThreshold := 0.7

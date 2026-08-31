@@ -445,7 +445,7 @@ func main() {
 			r.Patch("/instances/{id}/browser-active", handlers.SetBrowserActive)
 			r.Patch("/instances/{id}/browser-enabled", handlers.SetBrowserEnabled)
 
-			// Memory backend (builtin/QMD) configuration.
+			// Builtin memory configuration.
 			r.Get("/instances/{id}/memory", handlers.GetInstanceMemory)
 			r.Patch("/instances/{id}/memory", handlers.SetInstanceMemory)
 

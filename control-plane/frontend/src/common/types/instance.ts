@@ -201,36 +201,31 @@ export interface InstanceConfigUpdate {
   restarted: boolean;
 }
 
-/** One memory.qmd.scope rule: allow/deny gated on chat type. Renders to
- * OpenClaw's `{action, match: {chatType}}` shape in buildMemoryConfig. */
-export interface MemoryQmdScopeRule {
-  action: "allow" | "deny";
-  chat_type: "direct" | "group" | "channel";
-}
-
-/** Which chat types can see QMD search results (memory.qmd.scope). OpenClaw's
- * own default is `{default: "deny", rules: [{action: "allow", match: {chatType: "direct"}}]}` —
- * i.e. direct chats only. */
-export interface MemoryQmdScope {
-  default?: "allow" | "deny";
-  rules?: MemoryQmdScopeRule[];
-}
-
-/** Curated QMD memory settings managed by Claworc (see docs/qmd-memory.md).
+/** Curated builtin-memory settings managed by Claworc (see docs/memory-config.md).
+ * Maps to OpenClaw's memory.search.* config plus top-level memory.citations.
  * Unset fields inherit: instance override → global default → OpenClaw default. */
-export interface MemoryQmdSettings {
-  search_mode?: "search" | "vsearch" | "query";
-  /** Reindex cadence, e.g. "5m", "1h". */
-  update_interval?: string;
+export interface MemorySettings {
+  /** memory.search.provider: embedding adapter id ("openai", "gemini", "local",
+   * "none" for FTS-only, or a custom models.providers.<id> key). */
+  provider?: string;
+  /** memory.search.model: embedding model name override. */
+  model?: string;
+  /** memory.search.fallback: adapter id tried when the primary provider fails. */
+  fallback?: string;
+  /** memory.search.query.maxResults (OpenClaw default 6). */
   max_results?: number;
-  /** Index session transcripts. */
+  /** memory.search.query.minScore (0.0-1.0). */
+  min_score?: number;
+  /** Top-level memory.citations: "auto" | "on" | "off". */
+  citations?: "auto" | "on" | "off";
+  /** memory.search.rememberAcrossConversations: recall context from this
+   * agent's other recognized private conversations. */
+  remember_across_conversations?: boolean;
+  /** Adds/removes "sessions" from memory.search.sources so session
+   * transcripts are indexed and searchable. */
   sessions_enabled?: boolean;
-  /** Index MEMORY.md and memory/ markdown in the workspace. */
-  include_default_memory?: boolean;
-  /** Which chat types (direct/group/channel) can see QMD search results.
-   * Unset = inherit; OpenClaw's own default only allows direct chats. */
-  scope?: MemoryQmdScope;
-  /** Raw JSON object deep-merged into memory.qmd for anything not modeled above. */
+  /** Raw JSON object deep-merged into memory.search for anything not modeled
+   * above (multimodal, remote endpoint/headers, store.vector, cache, ...). */
   advanced?: Record<string, unknown>;
 }
 
@@ -243,20 +238,17 @@ export interface IndexedFolder {
 
 /** GET/PATCH /instances/{id}/memory payload. */
 export interface InstanceMemory {
-  /** Per-instance override; "" = inherit the global default. */
-  memory_backend: "" | "builtin" | "qmd";
-  effective_backend: "builtin" | "qmd";
-  default_backend: "builtin" | "qmd";
-  qmd: MemoryQmdSettings;
-  effective_qmd: MemoryQmdSettings;
+  /** Per-instance override object. */
+  settings: MemorySettings;
+  /** Global defaults + override merged. */
+  effective_settings: MemorySettings;
   indexed_folders: IndexedFolder[];
   restarts_gateway_on_apply: boolean;
 }
 
 export interface InstanceMemoryUpdatePayload {
-  memory_backend?: "" | "builtin" | "qmd";
   /** Full replacement of the per-instance override object. */
-  qmd?: MemoryQmdSettings;
+  settings: MemorySettings;
 }
 
 /** One lossless-claw fallbackProviders entry: an alternate provider/model

@@ -72,48 +72,13 @@ RUN mkdir -p /opt/homebrew-skeleton && \
     mkdir -p /home/linuxbrew/.linuxbrew && \
     chown -R claworc:claworc /opt/homebrew-skeleton /home/linuxbrew
 
-# QMD (github.com/tobi/qmd): local-first hybrid search CLI that OpenClaw
-# shells out to when memory.backend=qmd (pushed by the control plane; the
-# baked config keeps the builtin backend). Bun runs it; both live under
-# /opt/bun, with launchers symlinked into /usr/local/bin so qmd is on PATH
-# for the openclaw-gateway process (which resolves the `qmd` command from
-# its own PATH, not an interactive shell's). Model downloads and the index
-# happen at runtime under ~/.cache and ~/.openclaw on the home PVC.
-# Install qmd from the published npm package (@tobilu/qmd), NOT the
-# github:tobi/qmd ref: a git dependency runs qmd's `prepare` script, which
-# invokes tsc via a hardcoded nested node_modules path that bun's global
-# hoisting breaks (MODULE_NOT_FOUND on .../qmd/node_modules/typescript/bin/tsc).
-# The registry tarball ships prebuilt dist/ and skips `prepare` entirely.
-# The bun symlink must still exist BEFORE `bun add`: better-sqlite3 (a qmd
-# dependency) may fall back to node-gyp, which bun shims with a script that
-# invokes `bun` from PATH — without the symlink the install dies with
-# "node-gyp: 3: bun: not found" (exit 127).
-# node-llama-cpp (qmd's embedding/rerank backend) auto-detects GPU support
-# via getLlama("auto"), which on this fleet's headless/GPU-less virtualized
-# hosts probes Vulkan, determines the prebuilt Vulkan binary is
-# incompatible, and segfaults inside Bun while falling back to the CPU
-# path (`qmd vsearch`/`qmd query` run ~45-90s of embedding/rerank work,
-# then `panic: Segmentation fault`). This is an open upstream bug, not an
-# AVX512/cpuid dispatch issue — see withcatai/node-llama-cpp#554
-# ("Segmentation fault on CPU fallback when Vulkan prebuilt binary is
-# incompatible (Linux x64, no GPU)"), reproduced independently here
-# 2026-08-24 on Bun 1.4.0 with the full untouched set of node-llama-cpp
-# ggml-cpu binaries (an earlier fix in this file mistakenly stripped
-# AVX512 .so variants, which correlated with but did not cause the
-# crash — removing them entirely did not stop the segfault). Setting
-# QMD_LLAMA_GPU=false makes qmd skip the GPU auto-detect/Vulkan-probe
-# path and go straight to CPU inference, which avoids the crash;
-# verified working end-to-end (embed + vsearch, real results, exit 0)
-# with this env var alone, no binary stripping needed. Pin @tobilu/qmd to
-# the exact version this was verified against so a future qmd release
-# doesn't silently change node-llama-cpp's transitive version underneath
-# this fix; bump deliberately and re-verify vsearch/query when upgrading.
-ENV QMD_LLAMA_GPU=false
-RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/opt/bun bash && \
-    ln -s /opt/bun/bin/bun /usr/local/bin/bun && \
-    BUN_INSTALL=/opt/bun bun add -g --trust @tobilu/qmd@2.8.3 && \
-    ln -s /opt/bun/bin/qmd /usr/local/bin/qmd && \
-    /usr/local/bin/qmd --version
+# QMD (github.com/tobi/qmd), the local-first hybrid-search sidecar this
+# image used to bake in for OpenClaw's now-removed memory.backend=qmd
+# option, was retired: Claworc only configures OpenClaw's builtin memory
+# engine now (see docs/memory-config.md and
+# https://docs.openclaw.ai/concepts/memory-builtin#migrating-from-qmd).
+# Bun was installed solely to run qmd and is removed with it — nothing else
+# in this image depends on it.
 
 COPY browser.json /defaults/browser.json
 # TOOLS.md is staged here only so the bake step below can drop it into the

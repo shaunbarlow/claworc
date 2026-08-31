@@ -220,8 +220,8 @@ function FolderModal({
   );
   const [hostPath, setHostPath] = useState(folder?.host_path ?? "");
   const [readOnly, setReadOnly] = useState(folder?.read_only ?? true);
-  const [qmdIndex, setQmdIndex] = useState(folder?.qmd_index ?? false);
-  const [qmdPattern, setQmdPattern] = useState(folder?.qmd_pattern ?? "");
+  const [memoryIndex, setMemoryIndex] = useState(folder?.memory_index ?? false);
+  const [memoryIndexPattern, setMemoryIndexPattern] = useState(folder?.memory_index_pattern ?? "");
   const [selectedInstances, setSelectedInstances] = useState<number[]>(
     folder?.instance_ids ?? [],
   );
@@ -266,8 +266,8 @@ function FolderModal({
       createSharedFolder({
         name,
         mount_path: mountPath,
-        qmd_index: qmdIndex,
-        qmd_pattern: qmdPattern.trim(),
+        memory_index: memoryIndex,
+        memory_index_pattern: memoryIndexPattern.trim(),
         ...(mountToHost
           ? { host_path: trimmedHostPath, read_only: readOnly }
           : {}),
@@ -296,8 +296,8 @@ function FolderModal({
         name,
         instance_ids: selectedInstances,
         team_ids: selectedTeamIds,
-        qmd_index: qmdIndex,
-        qmd_pattern: qmdPattern.trim(),
+        memory_index: memoryIndex,
+        memory_index_pattern: memoryIndexPattern.trim(),
         ...(folder?.host_path ? { read_only: readOnly } : {}),
       }),
     onSuccess: () => {
@@ -309,16 +309,16 @@ function FolderModal({
   });
 
   const isPending = createMutation.isPending || updateMutation.isPending;
-  const qmdPatternInvalid =
-    qmdIndex &&
-    qmdPattern.trim() !== "" &&
-    (qmdPattern.trim().startsWith("/") || qmdPattern.includes(".."));
+  const memoryIndexPatternInvalid =
+    memoryIndex &&
+    memoryIndexPattern.trim() !== "" &&
+    (memoryIndexPattern.trim().startsWith("/") || memoryIndexPattern.includes(".."));
   const canSave =
     name.trim() !== "" &&
     mountPath.startsWith("/") &&
     !duplicateMountPath &&
     !hostPathInvalid &&
-    !qmdPatternInvalid;
+    !memoryIndexPatternInvalid;
 
   const origIds = folder?.instance_ids ?? [];
   const hasInstanceChanges =
@@ -475,26 +475,26 @@ function FolderModal({
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
-                checked={qmdIndex}
-                onChange={(e) => setQmdIndex(e.target.checked)}
+                checked={memoryIndex}
+                onChange={(e) => setMemoryIndex(e.target.checked)}
                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               Include in memory index
             </label>
             <p className="text-xs text-gray-400 mt-1 ml-6">
-              Attached agents using the QMD memory backend index this folder's files for memory search.
+              Attached agents index this folder's files into their builtin OpenClaw memory search.
             </p>
-            {qmdIndex && (
+            {memoryIndex && (
               <div className="mt-2 ml-6">
                 <label className="block text-xs text-gray-500 mb-1">File Pattern</label>
                 <input
                   type="text"
-                  value={qmdPattern}
-                  onChange={(e) => setQmdPattern(e.target.value)}
+                  value={memoryIndexPattern}
+                  onChange={(e) => setMemoryIndexPattern(e.target.value)}
                   placeholder="**/*.md"
                   className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                {qmdPatternInvalid && (
+                {memoryIndexPatternInvalid && (
                   <p className="text-xs text-red-600 mt-1">
                     Pattern must be relative and must not contain "..".
                   </p>

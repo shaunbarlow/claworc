@@ -18,61 +18,89 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// MemoryQmdScopeRule is one memory.qmd.scope rule: allow/deny gated on chat
-// type. Renders to OpenClaw's `{action, match: {chatType}}` shape.
-type MemoryQmdScopeRule struct {
-	Action   string `json:"action"`
-	ChatType string `json:"chat_type"`
+// memorySearchProviders are the embedding adapter ids OpenClaw's builtin
+// memory engine ships with (see docs/reference/memory-config: "Provider
+// selection"). "" means "leave memory.search.provider unset" (OpenClaw
+// defaults to openai when an OpenAI key is configured, otherwise FTS-only).
+// Also accepted: any custom `models.providers.<id>` key Claworc doesn't know
+// about — validated as "non-empty string", not against this list, so a
+// deliberate custom provider id (e.g. a self-hosted Ollama endpoint) always
+// round-trips even though it isn't in the curated dropdown.
+var memorySearchProviders = map[string]bool{
+	"":                  true,
+	"none":              true,
+	"bedrock":           true,
+	"deepinfra":         true,
+	"gemini":            true,
+	"github-copilot":    true,
+	"lmstudio":          true,
+	"local":             true,
+	"mistral":           true,
+	"ollama":            true,
+	"openai":            true,
+	"openai-compatible": true,
+	"voyage":            true,
 }
 
-// MemoryQmdScope controls which chat types can see QMD search results
-// (memory.qmd.scope). OpenClaw's own default only allows direct chats:
-// {default: "deny", rules: [{action: "allow", match: {chatType: "direct"}}]}.
-// A nil Scope means "inherit"; an explicit Scope with an empty Rules slice
-// still round-trips (e.g. deny-everything via Default alone).
-type MemoryQmdScope struct {
-	Default string                `json:"default,omitempty"`
-	Rules   []MemoryQmdScopeRule `json:"rules,omitempty"`
+var memoryCitationsModes = map[string]bool{"": true, "auto": true, "on": true, "off": true}
+
+// MemoryExtraPathEntry is one memory.search.extraPaths entry: either a bare
+// path string (whole-directory/file index) or a {path, pattern} glob-scoped
+// object. Renders to OpenClaw's own union shape verbatim.
+type MemoryExtraPathEntry struct {
+	Path    string `json:"path"`
+	Pattern string `json:"pattern,omitempty"`
 }
 
-// MemoryQmdSettings is the curated subset of OpenClaw's memory.qmd.* config
-// that Claworc manages, plus a raw escape hatch for everything else. It is
-// stored as JSON both in the default_memory_qmd setting (global defaults) and
-// in Instance.MemoryQmd (per-instance override). Pointer/omitempty fields
-// distinguish "not set — inherit" from an explicit value.
-type MemoryQmdSettings struct {
-	// SearchMode maps to memory.qmd.searchMode: "search" | "vsearch" | "query".
-	SearchMode string `json:"search_mode,omitempty"`
-	// UpdateInterval maps to memory.qmd.update.interval (e.g. "5m", "1h").
-	UpdateInterval string `json:"update_interval,omitempty"`
-	// MaxResults maps to memory.qmd.limits.maxResults.
+// MemorySettings is the curated subset of OpenClaw's builtin memory.search.*
+// config (plus top-level memory.citations) that Claworc manages with real
+// form fields, plus a raw escape hatch for everything else. It is stored as
+// JSON both in the default_memory_settings setting (global defaults) and in
+// Instance.MemorySettings (per-instance override). Pointer/omitempty fields
+// distinguish "not set — inherit" from an explicit value, mirroring
+// LosslessClawSettings.
+type MemorySettings struct {
+	// Provider maps to memory.search.provider: embedding adapter id such as
+	// "openai", "gemini", "local", or a custom models.providers.<id> key.
+	// "" leaves it unset (OpenClaw auto-detects); "none" deliberately selects
+	// FTS-only keyword search with no embeddings.
+	Provider string `json:"provider,omitempty"`
+	// Model maps to memory.search.model: embedding model name override.
+	Model string `json:"model,omitempty"`
+	// Fallback maps to memory.search.fallback: adapter id tried when the
+	// primary provider fails. OpenClaw default is "none".
+	Fallback string `json:"fallback,omitempty"`
+	// MaxResults maps to memory.search.query.maxResults (OpenClaw default 6).
 	MaxResults *int `json:"max_results,omitempty"`
-	// SessionsEnabled maps to memory.qmd.sessions.enabled (index transcripts).
+	// MinScore maps to memory.search.query.minScore (0.0-1.0).
+	MinScore *float64 `json:"min_score,omitempty"`
+	// Citations maps to top-level memory.citations: "auto" | "on" | "off".
+	Citations string `json:"citations,omitempty"`
+	// RememberAcrossConversations maps to
+	// memory.search.rememberAcrossConversations: let this agent recall
+	// context from its own other recognized private conversations.
+	RememberAcrossConversations *bool `json:"remember_across_conversations,omitempty"`
+	// SessionsEnabled adds/removes "sessions" from memory.search.sources so
+	// session transcripts are indexed and searchable, independent of
+	// RememberAcrossConversations (which implies it but isn't required for
+	// it). OpenClaw default sources is ["memory"] only.
 	SessionsEnabled *bool `json:"sessions_enabled,omitempty"`
-	// IncludeDefaultMemory maps to memory.qmd.includeDefaultMemory
-	// (MEMORY.md / memory/**/*.md in the workspace).
-	IncludeDefaultMemory *bool `json:"include_default_memory,omitempty"`
-	// Scope maps to memory.qmd.scope: which chat types (direct/group/channel)
-	// can see QMD search results. Nil = inherit; OpenClaw's own default only
-	// allows direct chats, so group/channel results need an explicit rule.
-	Scope *MemoryQmdScope `json:"scope,omitempty"`
 	// Advanced is a raw JSON object deep-merged into the generated
-	// memory.qmd subtree last, so any OpenClaw option Claworc doesn't model
-	// (scope rules, timeouts, debounce, ...) remains reachable.
+	// memory.search subtree last, so any OpenClaw option Claworc doesn't
+	// model (multimodal, remote endpoint/headers, store.vector, cache,
+	// input-type labels, ...) remains reachable.
 	Advanced json.RawMessage `json:"advanced,omitempty"`
 }
 
-var memoryIntervalRe = regexp.MustCompile(`^\d+(ms|s|m|h)$`)
+// memoryNonBlankRe matches any non-whitespace character; used to reject
+// whitespace-only strings for free-text fields (provider/model/fallback).
+var memoryNonBlankRe = regexp.MustCompile(`\S`)
 
-func isValidMemoryBackend(v string) bool {
-	return v == "" || v == "builtin" || v == "qmd"
-}
-
-// parseMemoryQmdSettings unmarshals and validates a MemoryQmdSettings JSON
-// object. Unknown top-level keys are rejected so typos surface at save time
-// instead of silently doing nothing (OpenClaw's own schema is strict too).
-func parseMemoryQmdSettings(raw []byte) (MemoryQmdSettings, error) {
-	var s MemoryQmdSettings
+// parseMemorySettings unmarshals and validates a MemorySettings JSON object.
+// Unknown top-level keys are rejected so typos surface at save time instead
+// of silently doing nothing (OpenClaw's own schema is strict too).
+func parseMemorySettings(raw []byte) (MemorySettings, error) {
+	var s MemorySettings
 	if len(raw) == 0 || string(raw) == "null" {
 		return s, nil
 	}
@@ -81,31 +109,31 @@ func parseMemoryQmdSettings(raw []byte) (MemoryQmdSettings, error) {
 	if err := dec.Decode(&s); err != nil {
 		return s, err
 	}
-	switch s.SearchMode {
-	case "", "search", "vsearch", "query":
-	default:
-		return s, fmt.Errorf("search_mode must be one of search, vsearch, query")
-	}
-	if s.UpdateInterval != "" && !memoryIntervalRe.MatchString(s.UpdateInterval) {
-		return s, fmt.Errorf("update_interval must look like \"30s\", \"5m\" or \"1h\"")
-	}
-	if s.MaxResults != nil && (*s.MaxResults < 1 || *s.MaxResults > 50) {
-		return s, fmt.Errorf("max_results must be between 1 and 50")
-	}
-	if s.Scope != nil {
-		if s.Scope.Default != "" && s.Scope.Default != "allow" && s.Scope.Default != "deny" {
-			return s, fmt.Errorf("scope.default must be \"allow\" or \"deny\"")
+	if s.Provider != "" && !memorySearchProviders[s.Provider] {
+		// Not a curated id — allow it through as a custom models.providers.*
+		// reference (see field doc), but still reject obvious whitespace-only
+		// junk so a stray space doesn't silently become an "unknown provider"
+		// error deep in OpenClaw instead of here.
+		if !memoryNonBlankRe.MatchString(s.Provider) {
+			return s, fmt.Errorf("provider must not be blank")
 		}
-		for i, r := range s.Scope.Rules {
-			if r.Action != "allow" && r.Action != "deny" {
-				return s, fmt.Errorf("scope.rules[%d].action must be \"allow\" or \"deny\"", i)
-			}
-			switch r.ChatType {
-			case "direct", "group", "channel":
-			default:
-				return s, fmt.Errorf("scope.rules[%d].chat_type must be one of direct, group, channel", i)
-			}
+	}
+	if s.Model != "" && !memoryNonBlankRe.MatchString(s.Model) {
+		return s, fmt.Errorf("model must not be blank")
+	}
+	if s.Fallback != "" && !memorySearchProviders[s.Fallback] {
+		if !memoryNonBlankRe.MatchString(s.Fallback) {
+			return s, fmt.Errorf("fallback must not be blank")
 		}
+	}
+	if s.MaxResults != nil && (*s.MaxResults < 1 || *s.MaxResults > 100) {
+		return s, fmt.Errorf("max_results must be between 1 and 100")
+	}
+	if s.MinScore != nil && (*s.MinScore < 0 || *s.MinScore > 1) {
+		return s, fmt.Errorf("min_score must be between 0 and 1")
+	}
+	if !memoryCitationsModes[s.Citations] {
+		return s, fmt.Errorf("citations must be one of \"\", auto, on, off")
 	}
 	if len(s.Advanced) > 0 {
 		var obj map[string]interface{}
@@ -116,37 +144,43 @@ func parseMemoryQmdSettings(raw []byte) (MemoryQmdSettings, error) {
 	return s, nil
 }
 
-// loadMemoryQmdSettings is the lenient variant used when reading stored
-// values: bad JSON degrades to zero settings instead of erroring.
-func loadMemoryQmdSettings(raw string) MemoryQmdSettings {
-	var s MemoryQmdSettings
+// loadMemorySettings is the lenient variant used when reading stored values:
+// bad JSON degrades to zero settings instead of erroring.
+func loadMemorySettings(raw string) MemorySettings {
+	var s MemorySettings
 	if raw != "" {
 		json.Unmarshal([]byte(raw), &s)
 	}
 	return s
 }
 
-// mergeMemoryQmdSettings overlays the per-instance override on the global
+// mergeMemorySettings overlays the per-instance override on the global
 // defaults, field by field. Set fields win; unset fields inherit.
-func mergeMemoryQmdSettings(global, override MemoryQmdSettings) MemoryQmdSettings {
+func mergeMemorySettings(global, override MemorySettings) MemorySettings {
 	out := global
-	if override.SearchMode != "" {
-		out.SearchMode = override.SearchMode
+	if override.Provider != "" {
+		out.Provider = override.Provider
 	}
-	if override.UpdateInterval != "" {
-		out.UpdateInterval = override.UpdateInterval
+	if override.Model != "" {
+		out.Model = override.Model
+	}
+	if override.Fallback != "" {
+		out.Fallback = override.Fallback
 	}
 	if override.MaxResults != nil {
 		out.MaxResults = override.MaxResults
 	}
+	if override.MinScore != nil {
+		out.MinScore = override.MinScore
+	}
+	if override.Citations != "" {
+		out.Citations = override.Citations
+	}
+	if override.RememberAcrossConversations != nil {
+		out.RememberAcrossConversations = override.RememberAcrossConversations
+	}
 	if override.SessionsEnabled != nil {
 		out.SessionsEnabled = override.SessionsEnabled
-	}
-	if override.IncludeDefaultMemory != nil {
-		out.IncludeDefaultMemory = override.IncludeDefaultMemory
-	}
-	if override.Scope != nil {
-		out.Scope = override.Scope
 	}
 	if len(override.Advanced) > 0 {
 		out.Advanced = override.Advanced
@@ -154,41 +188,16 @@ func mergeMemoryQmdSettings(global, override MemoryQmdSettings) MemoryQmdSetting
 	return out
 }
 
-// effectiveMemoryBackend resolves the memory backend for an instance:
-// per-instance override, else global default, else "builtin".
-func effectiveMemoryBackend(inst *database.Instance) string {
-	if inst.MemoryBackend != "" {
-		return inst.MemoryBackend
-	}
-	if v, err := database.GetSetting("default_memory_backend"); err == nil && (v == "builtin" || v == "qmd") {
-		return v
-	}
-	return "builtin"
-}
-
-// qmdCollectionName derives a QMD collection slug from a shared folder name.
-// OpenClaw suffixes collection names per agent, so this only needs to be
-// stable and unique per folder — the folder ID guarantees that.
-func qmdCollectionName(sf *database.SharedFolder) string {
-	slug := strings.ToLower(sf.Name)
-	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
-	slug = strings.Trim(slug, "-")
-	if slug == "" {
-		return fmt.Sprintf("folder-%d", sf.ID)
-	}
-	return fmt.Sprintf("%s-%d", slug, sf.ID)
-}
-
-// qmdIndexedFolders returns the attached shared folders flagged for QMD
-// indexing, in stable order.
-func qmdIndexedFolders(instanceID uint) []database.SharedFolder {
+// memoryIndexedFolders returns the attached shared folders flagged for
+// builtin-memory indexing, in stable order.
+func memoryIndexedFolders(instanceID uint) []database.SharedFolder {
 	folders, err := database.GetSharedFoldersForInstance(instanceID)
 	if err != nil {
 		return nil
 	}
 	out := make([]database.SharedFolder, 0, len(folders))
 	for _, sf := range folders {
-		if sf.QmdIndex {
+		if sf.MemoryIndex {
 			out = append(out, sf)
 		}
 	}
@@ -197,7 +206,7 @@ func qmdIndexedFolders(instanceID uint) []database.SharedFolder {
 
 // deepMergeJSON merges src into dst recursively; src values win, and nested
 // objects merge key-wise. Used to overlay the Advanced escape hatch onto the
-// generated memory.qmd subtree.
+// generated memory.search subtree.
 func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
 	if dst == nil {
 		dst = map[string]interface{}{}
@@ -215,89 +224,87 @@ func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
 }
 
 // buildMemoryConfig resolves the complete `memory` config subtree Claworc
-// pushes into an instance's OpenClaw config. For the builtin backend this is
-// just {"backend":"builtin"}; for qmd it includes the merged knobs, the
-// shared-folder index paths, and the Advanced overlay.
+// pushes into an instance's OpenClaw config: top-level `citations` plus the
+// `search` subtree (provider/model/fallback, query limits,
+// rememberAcrossConversations, sources, extraPaths from indexed shared
+// folders, and the Advanced overlay). Returns an empty map when nothing is
+// configured, matching "leave OpenClaw's own memory defaults alone".
 //
 // Claworc owns the memory.* subtree once this feature is in use: pushes
 // replace it wholesale (one `config set … --replace`, see applyMemoryConfig)
 // so removed folders and cleared overrides actually disappear.
 func buildMemoryConfig(inst *database.Instance) map[string]interface{} {
-	backend := effectiveMemoryBackend(inst)
-	cfg := map[string]interface{}{"backend": backend}
-	if backend != "qmd" {
-		return cfg
-	}
+	globalRaw, _ := database.GetSetting("default_memory_settings")
+	s := mergeMemorySettings(loadMemorySettings(globalRaw), loadMemorySettings(inst.MemorySettings))
 
-	globalRaw, _ := database.GetSetting("default_memory_qmd")
-	s := mergeMemoryQmdSettings(loadMemoryQmdSettings(globalRaw), loadMemoryQmdSettings(inst.MemoryQmd))
-
-	qmd := map[string]interface{}{}
-	if s.SearchMode != "" {
-		qmd["searchMode"] = s.SearchMode
+	search := map[string]interface{}{}
+	if s.Provider != "" {
+		search["provider"] = s.Provider
 	}
-	if s.UpdateInterval != "" {
-		qmd["update"] = map[string]interface{}{"interval": s.UpdateInterval}
+	if s.Model != "" {
+		search["model"] = s.Model
 	}
-	if s.MaxResults != nil {
-		qmd["limits"] = map[string]interface{}{"maxResults": *s.MaxResults}
+	if s.Fallback != "" {
+		search["fallback"] = s.Fallback
+	}
+	if s.MaxResults != nil || s.MinScore != nil {
+		query := map[string]interface{}{}
+		if s.MaxResults != nil {
+			query["maxResults"] = *s.MaxResults
+		}
+		if s.MinScore != nil {
+			query["minScore"] = *s.MinScore
+		}
+		search["query"] = query
+	}
+	if s.RememberAcrossConversations != nil {
+		search["rememberAcrossConversations"] = *s.RememberAcrossConversations
 	}
 	if s.SessionsEnabled != nil {
-		qmd["sessions"] = map[string]interface{}{"enabled": *s.SessionsEnabled}
-	}
-	if s.IncludeDefaultMemory != nil {
-		qmd["includeDefaultMemory"] = *s.IncludeDefaultMemory
-	}
-	if s.Scope != nil {
-		scope := map[string]interface{}{}
-		if s.Scope.Default != "" {
-			scope["default"] = s.Scope.Default
+		sources := []string{"memory"}
+		if *s.SessionsEnabled {
+			sources = []string{"memory", "sessions"}
 		}
-		if len(s.Scope.Rules) > 0 {
-			rules := make([]map[string]interface{}, 0, len(s.Scope.Rules))
-			for _, r := range s.Scope.Rules {
-				rules = append(rules, map[string]interface{}{
-					"action": r.Action,
-					"match":  map[string]interface{}{"chatType": r.ChatType},
-				})
-			}
-			scope["rules"] = rules
-		}
-		if len(scope) > 0 {
-			qmd["scope"] = scope
-		}
+		search["sources"] = sources
 	}
 
-	if folders := qmdIndexedFolders(inst.ID); len(folders) > 0 {
-		paths := make([]map[string]interface{}, 0, len(folders))
+	if folders := memoryIndexedFolders(inst.ID); len(folders) > 0 {
+		extraPaths := make([]interface{}, 0, len(folders))
 		for i := range folders {
-			entry := map[string]interface{}{
-				"path": folders[i].MountPath,
-				"name": qmdCollectionName(&folders[i]),
+			if folders[i].MemoryIndexPattern != "" {
+				extraPaths = append(extraPaths, map[string]interface{}{
+					"path":    folders[i].MountPath,
+					"pattern": folders[i].MemoryIndexPattern,
+				})
+			} else {
+				extraPaths = append(extraPaths, folders[i].MountPath)
 			}
-			if folders[i].QmdPattern != "" {
-				entry["pattern"] = folders[i].QmdPattern
-			}
-			paths = append(paths, entry)
 		}
-		qmd["paths"] = paths
+		search["extraPaths"] = extraPaths
 	}
 
 	if len(s.Advanced) > 0 {
 		var adv map[string]interface{}
 		if err := json.Unmarshal(s.Advanced, &adv); err == nil {
-			qmd = deepMergeJSON(qmd, adv)
+			search = deepMergeJSON(search, adv)
 		}
 	}
-	if len(qmd) > 0 {
-		cfg["qmd"] = qmd
+
+	cfg := map[string]interface{}{}
+	if s.Citations != "" {
+		cfg["citations"] = s.Citations
+	}
+	if len(search) > 0 {
+		cfg["search"] = search
 	}
 	return cfg
 }
 
 // applyMemoryConfig replaces the memory subtree in the agent's OpenClaw
 // config over an established SSH connection and restarts the gateway
-// (memory.* is not hot-reloaded by OpenClaw).
+// (top-level memory.* has no dedicated hot-reload rule in OpenClaw's
+// config-reload planner, so it falls through to the default "restart"
+// classification).
 //
 // One atomic write, same as applySlackConfig/applyDiscordConfig. `config set`
 // replaces this subtree wholesale, so removed folders and cleared overrides
@@ -353,7 +360,7 @@ func pushMemoryConfig(instanceID uint, name string) {
 
 // pushMemoryConfigForFolder reconciles the OpenClaw memory config of every
 // running, non-legacy instance in the given ID set. Used when a shared
-// folder's QMD flags, membership, or mount path change.
+// folder's memory-index flags, membership, or mount path change.
 func pushMemoryConfigForFolder(instanceIDs []uint) {
 	if len(instanceIDs) == 0 {
 		return
@@ -375,11 +382,8 @@ func pushMemoryConfigForFolder(instanceIDs []uint) {
 
 // instanceMemoryResponse is the payload for GET/PATCH /instances/{id}/memory.
 type instanceMemoryResponse struct {
-	MemoryBackend          string              `json:"memory_backend"` // "" = inherit
-	EffectiveBackend       string              `json:"effective_backend"`
-	DefaultBackend         string              `json:"default_backend"`
-	Qmd                    MemoryQmdSettings   `json:"qmd"`           // per-instance override
-	EffectiveQmd           MemoryQmdSettings   `json:"effective_qmd"` // global defaults + override
+	Settings               MemorySettings      `json:"settings"`           // per-instance override
+	EffectiveSettings      MemorySettings      `json:"effective_settings"` // global defaults + override
 	IndexedFolders         []indexedFolderResp `json:"indexed_folders"`
 	RestartsGatewayOnApply bool                `json:"restarts_gateway_on_apply"`
 }
@@ -392,41 +396,31 @@ type indexedFolderResp struct {
 }
 
 func buildInstanceMemoryResponse(inst *database.Instance) instanceMemoryResponse {
-	defaultBackend := "builtin"
-	if v, err := database.GetSetting("default_memory_backend"); err == nil && (v == "builtin" || v == "qmd") {
-		defaultBackend = v
-	}
-	globalRaw, _ := database.GetSetting("default_memory_qmd")
-	override := loadMemoryQmdSettings(inst.MemoryQmd)
+	globalRaw, _ := database.GetSetting("default_memory_settings")
+	override := loadMemorySettings(inst.MemorySettings)
 
-	folders := qmdIndexedFolders(inst.ID)
+	folders := memoryIndexedFolders(inst.ID)
 	indexed := make([]indexedFolderResp, 0, len(folders))
 	for i := range folders {
-		pattern := folders[i].QmdPattern
-		if pattern == "" {
-			pattern = "**/*.md"
-		}
 		indexed = append(indexed, indexedFolderResp{
 			ID:        folders[i].ID,
 			Name:      folders[i].Name,
 			MountPath: folders[i].MountPath,
-			Pattern:   pattern,
+			Pattern:   folders[i].MemoryIndexPattern,
 		})
 	}
 
 	return instanceMemoryResponse{
-		MemoryBackend:          inst.MemoryBackend,
-		EffectiveBackend:       effectiveMemoryBackend(inst),
-		DefaultBackend:         defaultBackend,
-		Qmd:                    override,
-		EffectiveQmd:           mergeMemoryQmdSettings(loadMemoryQmdSettings(globalRaw), override),
+		Settings:               override,
+		EffectiveSettings:      mergeMemorySettings(loadMemorySettings(globalRaw), override),
 		IndexedFolders:         indexed,
 		RestartsGatewayOnApply: true,
 	}
 }
 
-// GetInstanceMemory returns the instance's memory backend configuration:
-// override, effective values, and the shared folders that feed its QMD index.
+// GetInstanceMemory returns the instance's builtin memory search
+// configuration: override, effective values, and the shared folders that
+// feed its extra-paths index.
 func GetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -445,9 +439,9 @@ func GetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, buildInstanceMemoryResponse(&inst))
 }
 
-// SetInstanceMemory updates the per-instance memory backend override and/or
-// QMD settings override, then reconciles the agent's OpenClaw config
-// (async, best-effort; requires a gateway restart to take effect).
+// SetInstanceMemory updates the per-instance memory settings override, then
+// reconciles the agent's OpenClaw config (async, best-effort; requires a
+// gateway restart to take effect).
 func SetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -460,14 +454,13 @@ func SetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		MemoryBackend *string          `json:"memory_backend"` // "" clears the override
-		Qmd           *json.RawMessage `json:"qmd"`            // full replacement of the override object
+		Settings *json.RawMessage `json:"settings"` // full replacement of the override object
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if body.MemoryBackend == nil && body.Qmd == nil {
+	if body.Settings == nil {
 		writeError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
@@ -478,42 +471,26 @@ func SetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if database.IsLegacyEmbedded(inst.ContainerImage) {
-		writeError(w, http.StatusBadRequest, "Memory backend configuration does not apply to legacy embedded instances")
+		writeError(w, http.StatusBadRequest, "Memory configuration does not apply to legacy embedded instances")
 		return
 	}
 
-	updates := map[string]interface{}{}
-	if body.MemoryBackend != nil {
-		if !isValidMemoryBackend(*body.MemoryBackend) {
-			writeError(w, http.StatusBadRequest, "memory_backend must be \"\", \"builtin\" or \"qmd\"")
-			return
-		}
-		updates["memory_backend"] = *body.MemoryBackend
+	s, err := parseMemorySettings(*body.Settings)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid settings: "+err.Error())
+		return
 	}
-	if body.Qmd != nil {
-		s, err := parseMemoryQmdSettings(*body.Qmd)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid qmd settings: "+err.Error())
-			return
-		}
-		encoded, err := json.Marshal(s)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Failed to encode qmd settings")
-			return
-		}
-		updates["memory_qmd"] = string(encoded)
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to encode settings")
+		return
 	}
 
-	if err := database.DB.Model(&inst).Updates(updates).Error; err != nil {
+	if err := database.DB.Model(&inst).Update("memory_settings", string(encoded)).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update instance")
 		return
 	}
-	if v, ok := updates["memory_backend"].(string); ok {
-		inst.MemoryBackend = v
-	}
-	if v, ok := updates["memory_qmd"].(string); ok {
-		inst.MemoryQmd = v
-	}
+	inst.MemorySettings = string(encoded)
 
 	// Reconcile the agent's OpenClaw config (async, best-effort).
 	pushMemoryConfig(inst.ID, inst.Name)
