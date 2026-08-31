@@ -88,6 +88,31 @@ func (c *AdminClient) CreateRuntimeToken(ctx context.Context, spec RuntimeTokenS
 	return resp.Token, resp.Record.ID, nil
 }
 
+// UpdateTokenNameAndPolicy updates a previously minted token's name and
+// policy via PUT /api/runtime-tokens/:id and returns whether the update
+// succeeded (true) or failed (false via err). Used during token sync operations
+// to reconcile old-style tokens to the canonical name and policy state.
+func (c *AdminClient) UpdateTokenNameAndPolicy(
+	ctx context.Context,
+	recordID string,
+	name string,
+	spec RuntimeTokenSpec,
+) (bool, error) {
+	if recordID == "" {
+		return false, nil
+	}
+	spec.Name = name
+	body, err := json.Marshal(spec)
+	if err != nil {
+		return false, fmt.Errorf("marshal update spec: %w", err)
+	}
+	var resp struct{}
+	if err := c.do(ctx, http.MethodPut, "/api/runtime-tokens/"+recordID, body, &resp); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // RevokeRuntimeToken deletes a previously minted token via DELETE
 // /api/runtime-tokens/:id. Used when an instance is deleted or the connector
 // feature is turned off for it.

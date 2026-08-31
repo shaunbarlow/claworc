@@ -245,6 +245,54 @@ func connectorTokenName(inst *database.Instance) string {
 	return fmt.Sprintf("Claworc agent: %s (%s, #%d)", inst.DisplayName, inst.Name, inst.ID)
 }
 
+// syncConnectorTokenNameAndPolicy reconciles an instance's token name and
+// policy at the connector side (if it exists) to match the Claworc canonical
+// state: descriptive name + restrictive default policy per
+// connectorTokenName() and defaultConnectorTokenPolicy(). Returns true when
+// the token was updated at the connector (not an error, just a state change
+// detected and synced).
+//
+// This is idempotent and best-effort: used in ensureInstanceConnectorToken
+// when a token already exists (to upgrade old-style unrestricted or
+// poorly-named tokens to the new standard) and later during token sync
+// operations (see syncAllInstanceTokens).
+func syncConnectorTokenNameAndPolicy(ctx context.Context, inst *database.Instance) bool {
+	if inst.ConnectorTokenID == "" {
+		return false
+	}
+	cfg, ok := resolvedConnectorConfig()
+	if !ok {
+		return false
+	}
+	orch := orchestrator.Get()
+	if orch == nil {
+		return false
+	}
+	mgr := connectorprov.New(orch)
+	host, port, err := mgr.Address(ctx)
+	if err != nil {
+		log.Printf("connector: sync token name/policy for instance %d: address lookup failed: %v", inst.ID, err)
+		return false
+	}
+	client := connectorprov.NewAdminClient(host, port, cfg.AdminToken)
+	allowedActions, allowedProxies, allowedConnections := defaultConnectorTokenPolicy()
+	_, err = client.UpdateTokenNameAndPolicy(
+		ctx,
+		inst.ConnectorTokenID,
+		connectorTokenName(inst),
+		connectorprov.RuntimeTokenSpec{
+			AllowedActions:     allowedActions,
+			AllowedProxies:     allowedProxies,
+			AllowedConnections: allowedConnections,
+		},
+	)
+	if err != nil {
+		log.Printf("connector: sync token name/policy for instance %d failed: %v", inst.ID, err)
+		return false
+	}
+	return true
+}
+
 // ensureInstanceConnectorToken mints a scoped OpenConnector runtime token for
 // inst if the feature is enabled and it doesn't already have one, persisting
 // it (encrypted) onto the row and updating inst in place. Returns true when a
@@ -265,7 +313,14 @@ func connectorTokenName(inst *database.Instance) string {
 // called it -- the agent simply boots without connector access this time
 // and picks up a token on the next call once the connector is reachable.
 func ensureInstanceConnectorToken(ctx context.Context, inst *database.Instance) (minted bool) {
-	if !connectorEnabled() || inst.ConnectorRuntimeToken != "" {
+	if !connectorEnabled() {
+		return false
+	}
+	// If token already exists, sync its name and policy to canonical state
+	if inst.ConnectorRuntimeToken != "" {
+		if inst.ConnectorTokenID != "" {
+			return syncConnectorTokenNameAndPolicy(ctx, inst)
+		}
 		return false
 	}
 	orch := orchestrator.Get()
