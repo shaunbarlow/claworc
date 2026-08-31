@@ -110,8 +110,8 @@ func TestConfigureInstance_ModelSet(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"claude-3-5-sonnet"}, nil, 0)
 
-	if len(inst.calls) < 3 {
-		t.Fatalf("expected at least 3 calls (model set + allowlist set + gateway stop), got %d", len(inst.calls))
+	if len(inst.calls) < 4 {
+		t.Fatalf("expected at least 4 calls (model set + allowlist set + modelPolicy.allow set + gateway stop), got %d", len(inst.calls))
 	}
 	// First call: config set agents.defaults.model
 	call0 := inst.calls[0]
@@ -128,6 +128,20 @@ func TestConfigureInstance_ModelSet(t *testing.T) {
 	}
 	if !strings.Contains(call1[3], "claude-3-5-sonnet") {
 		t.Errorf("models allowlist should contain claude-3-5-sonnet, got: %s", call1[3])
+	}
+	// Third call: config set agents.defaults.modelPolicy.allow. This is the
+	// explicit restriction OpenClaw doctor expects instead of relying on
+	// agents.defaults.models doubling as an implicit allowlist (a legacy
+	// key doctor now flags for migration).
+	call2 := inst.calls[2]
+	if call2[0] != "config" || call2[1] != "set" || call2[2] != "agents.defaults.modelPolicy.allow" {
+		t.Errorf("unexpected third call: %v", call2)
+	}
+	if !strings.Contains(call2[3], "claude-3-5-sonnet") {
+		t.Errorf("modelPolicy.allow should contain claude-3-5-sonnet, got: %s", call2[3])
+	}
+	if !containsArg(call2, "--replace") {
+		t.Errorf("modelPolicy.allow set must pass --replace, got %v", call2)
 	}
 	for _, c := range inst.calls {
 		if c[1] == "unset" {
@@ -218,6 +232,9 @@ func TestConfigureInstance_NilModelsEmptySlice(t *testing.T) {
 		if call[0] == "config" && call[2] == "agents.defaults.models" {
 			t.Errorf("models allowlist should not be called when models is nil, got call: %v", call)
 		}
+		if call[0] == "config" && call[2] == "agents.defaults.modelPolicy.allow" {
+			t.Errorf("modelPolicy.allow should not be called when models is nil, got call: %v", call)
+		}
 	}
 }
 
@@ -251,6 +268,7 @@ func TestConfigureInstance_ModelSetNonZeroCode(t *testing.T) {
 
 	hasProviders := false
 	hasAllowlist := false
+	hasModelPolicy := false
 	for _, c := range inst.calls {
 		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
 			hasProviders = true
@@ -258,12 +276,18 @@ func TestConfigureInstance_ModelSetNonZeroCode(t *testing.T) {
 		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
 			hasAllowlist = true
 		}
+		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.modelPolicy.allow" {
+			hasModelPolicy = true
+		}
 	}
 	if !hasProviders {
 		t.Errorf("providers must be set even when model config returns non-zero; calls: %v", inst.calls)
 	}
 	if !hasAllowlist {
 		t.Errorf("models allowlist must be set even when model config returns non-zero; calls: %v", inst.calls)
+	}
+	if !hasModelPolicy {
+		t.Errorf("modelPolicy.allow must be set even when model config returns non-zero; calls: %v", inst.calls)
 	}
 }
 

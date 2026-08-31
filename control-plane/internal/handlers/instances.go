@@ -2848,6 +2848,30 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 				log.Printf("Failed to set models allowlist for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
 			}
 		}
+
+		// Also set the restriction explicitly via modelPolicy.allow.
+		//
+		// agents.defaults.models above is metadata (aliases/per-model settings)
+		// only; historically a non-empty map there *also* acted as an implicit
+		// allowlist, but that dual role is now the deprecated path -- OpenClaw
+		// doctor flags it as a legacy key needing migration to the explicit
+		// agents.defaults.modelPolicy.allow restriction (see
+		// https://docs.openclaw.ai/concepts/models#quick-model-policy). Once
+		// modelPolicy.allow is set explicitly, agents.defaults.models reverts
+		// to pure metadata and stops tripping the legacy-key warning on every
+		// doctor run. Same protected-path/--replace rationale as above: a
+		// de-selected model has to actually disappear from the list.
+		modelPolicyJSON, err := json.Marshal(models)
+		if err != nil {
+			log.Printf("Error marshaling modelPolicy.allow for %s: %v", utils.SanitizeForLog(name), err)
+		} else {
+			_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.modelPolicy.allow", string(modelPolicyJSON), "--replace", "--json")
+			if err != nil {
+				log.Printf("Error setting modelPolicy.allow for %s: %v", utils.SanitizeForLog(name), err)
+			} else if code != 0 {
+				log.Printf("Failed to set modelPolicy.allow for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
+			}
+		}
 	}
 
 	// Set gateway providers via openclaw CLI.

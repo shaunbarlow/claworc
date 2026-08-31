@@ -20,14 +20,15 @@ function structureOf(obj: any): any {
 
 describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
   // Wait for openclaw gateway to be ready.
-  // The svc-openclaw run script executes `openclaw doctor --fix` followed by
-  // several `openclaw config set` commands before starting the gateway — each
-  // spawns Node.js under QEMU emulation, which is very slow with concurrent
-  // containers. By the time browser.test.ts finishes, the gateway is usually ready.
-  // Wait for openclaw gateway to be ready.
-  // Under QEMU with multiple concurrent containers, `openclaw doctor --fix` +
-  // several `openclaw config set` commands can take 15+ minutes. The gateway
-  // only starts after all of those complete.
+  // The init-openclaw-doctor oneshot runs `openclaw doctor --fix --non-interactive`
+  // (repairing any legacy config/state left by an older baked image), then the
+  // svc-openclaw run script applies several `openclaw config set` commands
+  // before starting the gateway — each spawns Node.js under QEMU emulation,
+  // which is very slow with concurrent containers. By the time browser.test.ts
+  // finishes, the gateway is usually ready.
+  // Under QEMU with multiple concurrent containers, doctor --fix + several
+  // `openclaw config set` commands can take 15+ minutes. The gateway only
+  // starts after all of those complete.
   beforeAll(async () => {
     const deadline = Date.now() + 900_000;
     while (Date.now() < deadline) {

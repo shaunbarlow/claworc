@@ -16,7 +16,13 @@ s6-setuidgid claworc openclaw config set gateway.mode local
 # Newer openclaw rejects host-alias values (e.g. `localhost`) for gateway.bind
 # and demands a bind-mode keyword (lan/loopback/custom/tailnet/auto) instead.
 s6-setuidgid claworc openclaw config set gateway.bind loopback
-s6-setuidgid claworc openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true
+# gateway.controlUi.dangerouslyDisableDeviceAuth is retired and fully inert as
+# of the OpenClaw 2.0 (v2026.8.1) config surface -- Control UI browsers pair
+# through the normal device flow regardless of this key's value, and doctor
+# now flags any lingering copy of it as a legacy key needing removal (see
+# https://docs.openclaw.ai/gateway/security#control-ui-over-http). Do not
+# write it here; leave any existing copy on disk for `openclaw doctor --fix`
+# to clean up on an upgraded instance.
 
 # Set Control UI base path for reverse proxy
 if [ -n "$CLAWORC_INSTANCE_ID" ]; then

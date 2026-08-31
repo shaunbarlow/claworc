@@ -91,9 +91,11 @@ COPY rootfs/ /
 
 RUN chmod +x /etc/s6-overlay/s6-rc.d/init-setup/up \
              /etc/s6-overlay/s6-rc.d/init-openclaw-seed/up \
+             /etc/s6-overlay/s6-rc.d/init-openclaw-doctor/up \
              /etc/s6-overlay/s6-rc.d/init-homebrew-seed/up \
              /etc/s6-overlay/scripts/init-setup.sh \
              /etc/s6-overlay/scripts/init-openclaw-seed.sh \
+             /etc/s6-overlay/scripts/init-openclaw-doctor.sh \
              /etc/s6-overlay/scripts/init-homebrew-seed.sh \
              /etc/s6-overlay/s6-rc.d/svc-openclaw/run \
              /etc/s6-overlay/s6-rc.d/svc-sshd/run \
