@@ -35,13 +35,15 @@ func NewAdminClient(host string, port int, adminToken string) *AdminClient {
 }
 
 // RuntimeTokenSpec describes the policy a minted runtime token should carry.
-// Mirrors the fields documented in docs/runtime-api.md's POST
-// /api/runtime-tokens example. Nil slices are sent as empty (unrestricted
-// within that dimension, per that doc); AllowedActions/AllowedConnections
-// left empty is deliberate for a Level-1 shared deployment, where per-agent
-// scoping is not yet configurable from the Claworc UI (see the integration
-// plan's Level 2+ note) -- narrowing this later, once the UI exposes it, is
-// additive.
+// Mirrors the fields documented in the open-connector fork's
+// docs/runtime-api.md POST /api/runtime-tokens example. Nil slices are sent
+// as empty (unrestricted within that dimension, per that doc); Claworc's own
+// caller (handlers.defaultConnectorTokenPolicy) always populates
+// AllowedActions/AllowedProxies/AllowedConnections with a narrow default
+// grant for freshly minted instance tokens rather than leaving them empty --
+// per-agent policy widening beyond that default is not yet configurable from
+// the Claworc UI (see the integration plan's Level 2+ note) and is done via
+// the connector's own Web Console / admin API in the meantime.
 type RuntimeTokenSpec struct {
 	Name               string   `json:"name"`
 	AllowedActions     []string `json:"allowedActions"`

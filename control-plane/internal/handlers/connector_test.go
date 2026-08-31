@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gluk-w/claworc/control-plane/internal/config"
@@ -218,5 +219,51 @@ func TestGetConnectorStatus_DisabledReportsWithoutOrchestrator(t *testing.T) {
 	}
 	if body["status"] != "disabled" {
 		t.Errorf("status = %v, want disabled", body["status"])
+	}
+}
+
+func TestConnectorTokenName_IncludesDisplayNameNameAndID(t *testing.T) {
+	inst := &database.Instance{ID: 42, Name: "bot-research-bot", DisplayName: "Research Bot"}
+	got := connectorTokenName(inst)
+	for _, want := range []string{"Research Bot", "bot-research-bot", "42"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("connectorTokenName(%+v) = %q, want it to contain %q", inst, got, want)
+		}
+	}
+}
+
+func TestDefaultConnectorTokenPolicy_RestrictiveByDefault(t *testing.T) {
+	allowedActions, allowedProxies, allowedConnections := defaultConnectorTokenPolicy()
+
+	if len(allowedActions) == 0 {
+		t.Fatal("expected a non-empty allowedActions grant for the curated no_auth test services")
+	}
+	for _, rule := range allowedActions {
+		if !strings.HasSuffix(rule, ".*") {
+			t.Errorf("allowedActions rule %q does not match open-connector's required service.* syntax", rule)
+		}
+	}
+	// No provider proxy access and no stored-credential connection grant by
+	// default -- proxies are deny-by-default on an empty grant per
+	// docs/runtime-api.md, and no_auth virtual connections never need a grant
+	// (so an empty AllowedConnections does not itself widen access).
+	if allowedProxies == nil || len(allowedProxies) != 0 {
+		t.Errorf("allowedProxies = %v, want an explicit empty (deny-by-default) grant", allowedProxies)
+	}
+	if allowedConnections == nil || len(allowedConnections) != 0 {
+		t.Errorf("allowedConnections = %v, want an explicit empty grant", allowedConnections)
+	}
+}
+
+func TestDefaultConnectorTokenPolicy_MatchesCuratedServiceList(t *testing.T) {
+	allowedActions, _, _ := defaultConnectorTokenPolicy()
+	if len(allowedActions) != len(connectorTestOnlyServices) {
+		t.Fatalf("allowedActions has %d rules, want one per connectorTestOnlyServices entry (%d)",
+			len(allowedActions), len(connectorTestOnlyServices))
+	}
+	for i, svc := range connectorTestOnlyServices {
+		if want := svc + ".*"; allowedActions[i] != want {
+			t.Errorf("allowedActions[%d] = %q, want %q", i, allowedActions[i], want)
+		}
 	}
 }

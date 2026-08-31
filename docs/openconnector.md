@@ -51,6 +51,30 @@ Every instance created or restarted while the feature is enabled receives:
   (`POST /api/runtime-tokens`) and stored Fernet-encrypted on the `Instance`
   row (`ConnectorRuntimeToken` / `ConnectorTokenID`).
 
+  The token is named descriptively (`connectorTokenName` in
+  `internal/handlers/connector.go`), e.g. `Claworc agent: Research Bot
+  (bot-research-bot, #42)`, so it's identifiable at a glance in the
+  connector's own Web Console token list without cross-referencing an
+  instance ID against Claworc's own instance list.
+
+  By default the token's policy is restrictive
+  (`defaultConnectorTokenPolicy`): `allowedActions` is scoped to a small,
+  curated set of `no_auth` (no credential setup required) provider services
+  suitable for verifying the integration end-to-end (`arxiv`, `hackernews`,
+  `wttr_in`, `quickchart` as of this writing — see
+  `connectorTestOnlyServices`), `allowedProxies` is empty (no provider proxy
+  access), and `allowedConnections` is empty (no stored-credential
+  connection grant; irrelevant for `no_auth` virtual connections, which
+  never require one). This is deliberate: Level 1 has no Claworc UI for
+  per-agent policy yet, so a wide-open default token would hand every agent
+  instance unrestricted access to every configured connection — including
+  ones an admin added real credentials for — the moment the feature is
+  enabled. An admin who wants a specific instance to reach more of the
+  catalog widens that instance's token directly via the connector's own
+  admin API/Web Console (`PUT /api/runtime-tokens/:id`, reachable at
+  `/connector/*`); Claworc does not yet expose per-agent policy editing in
+  its own UI (tracked in the integration plan's Level 2+ note).
+
 Agents consume this exactly as documented in the `open-connector` skill
 (`skills/open-connector/SKILL.md`): call the runtime API, never the admin
 API, and treat `action_not_allowed` as the scoping working as intended.
@@ -97,9 +121,11 @@ created or restarted after the edit.
   connector directly" vs. "control-plane relays" — see Open Question #1 in
   the integration plan) — Level 2.
 - Per-agent policy configuration (allowedActions/allowedConnections) from the
-  Claworc UI — every minted token today is unrestricted at the connector
-  policy layer, same posture as OpenClaw's own env-var-sourced secrets.
-  Narrowing this later is additive (`RuntimeTokenSpec` already accepts the
-  fields; nothing about the storage or minting flow needs to change).
+  Claworc UI — every minted token today gets the same fixed, restrictive
+  default policy (see "What an agent gets" above); there is no UI yet to
+  widen or customize an individual instance's grant beyond going straight to
+  the connector's own admin API/Web Console. Exposing that is additive
+  (`RuntimeTokenSpec` already accepts the fields; nothing about the storage
+  or minting flow needs to change).
 - Backup coverage for the connector's own data volume — track alongside
   `docs/backups.md` when needed.

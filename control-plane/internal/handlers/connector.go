@@ -180,6 +180,50 @@ func buildConnectorEnvVars(inst *database.Instance) map[string]string {
 	return out
 }
 
+// connectorTestOnlyServices lists the no_auth (no credential/API key setup
+// required) provider services granted to every freshly minted instance
+// token by default. This is deliberately narrow: Level 1 has no Claworc UI
+// for per-agent policy yet (see
+// docs/planning/open-connector-integration-plan.md's Level 2+ note), so a
+// wide-open default token would hand every agent instance unrestricted
+// access to every configured connection (including ones an admin added
+// credentials for) the moment the feature is enabled. Restricting the
+// default grant to a curated set of no_auth/public-API services lets agents
+// exercise the connector for real (and lets an admin verify the integration
+// end-to-end) without silently granting access to anything that requires a
+// stored credential. Widening a specific instance's grant is a manual
+// PUT /api/runtime-tokens/:id via the connector's own admin API/Web Console
+// (reachable at /connector/* -- see docs/openconnector.md) until per-agent
+// policy is exposed in the Claworc UI.
+//
+// Sourced from the shipped catalog (`grep -rl '"no_auth"' src/providers/*/definition.ts`
+// in the open-connector fork) as of this writing; re-verify against the
+// fork's catalog if `connector_image` is pointed at a build with catalog
+// changes.
+var connectorTestOnlyServices = []string{
+	"arxiv",
+	"hackernews",
+	"wttr_in",
+	"quickchart",
+}
+
+// defaultConnectorTokenPolicy returns the restrictive default policy every
+// instance token is minted with: action access scoped to
+// connectorTestOnlyServices (via a `service.*` allow rule per service, the
+// syntax open-connector's policy-input validator requires -- see its
+// assertRuleSyntax), no provider proxy access at all (`AllowedProxies: []`,
+// deny-by-default per docs/runtime-api.md), and no stored-credential
+// connection grant (`AllowedConnections: []`, which does not need to include
+// anything since no_auth virtual connections never require a grant -- see
+// runtime-api.md's "virtual no_auth connections do not require grants").
+func defaultConnectorTokenPolicy() (allowedActions, allowedProxies, allowedConnections []string) {
+	actions := make([]string, len(connectorTestOnlyServices))
+	for i, svc := range connectorTestOnlyServices {
+		actions[i] = svc + ".*"
+	}
+	return actions, []string{}, []string{}
+}
+
 // connectorContainerPortForEnv mirrors connectorprov's fixed container port.
 // Duplicated rather than exported from connectorprov because the env var
 // Claworc renders here is a Docker-bridge-network / cluster-DNS hostname:port
@@ -191,11 +235,30 @@ func buildConnectorEnvVars(inst *database.Instance) map[string]string {
 // same claworc bridge network / cluster namespace as the connector.
 const connectorContainerPortForEnv = 3000
 
+// connectorTokenName builds the descriptive name Claworc mints an instance's
+// runtime token under, e.g. "Claworc agent: Research Bot (bot-research-bot,
+// #42)". Shown as-is in the connector's own Web Console token list, so it
+// needs to identify which agent instance a token belongs to without an
+// admin having to cross-reference IDs against Claworc's own instance list --
+// the previous "claworc-instance-42" name required exactly that lookup.
+func connectorTokenName(inst *database.Instance) string {
+	return fmt.Sprintf("Claworc agent: %s (%s, #%d)", inst.DisplayName, inst.Name, inst.ID)
+}
+
 // ensureInstanceConnectorToken mints a scoped OpenConnector runtime token for
 // inst if the feature is enabled and it doesn't already have one, persisting
 // it (encrypted) onto the row and updating inst in place. Returns true when a
 // token was freshly minted (the caller then knows the container needs the
 // new env var, i.e. treat it like any other env-var drift).
+//
+// The minted token carries connectorTokenName's descriptive label and
+// defaultConnectorTokenPolicy's restrictive default grant (a curated set of
+// no_auth test-purpose services, no proxy access, no stored-credential
+// connection access) -- see those doc comments for why. An admin who wants
+// this instance to reach more of the catalog widens its token's policy
+// directly via the connector's own admin API/Web Console
+// (PUT /api/runtime-tokens/:id, reachable at /connector/*); Claworc does not
+// yet expose per-agent policy editing in its own UI.
 //
 // Best-effort: any failure (connector not reachable yet, admin API error) is
 // logged and returns false rather than blocking whatever create/restart flow
@@ -220,8 +283,12 @@ func ensureInstanceConnectorToken(ctx context.Context, inst *database.Instance) 
 		return false
 	}
 	client := connectorprov.NewAdminClient(host, port, cfg.AdminToken)
+	allowedActions, allowedProxies, allowedConnections := defaultConnectorTokenPolicy()
 	token, recordID, err := client.CreateRuntimeToken(ctx, connectorprov.RuntimeTokenSpec{
-		Name: fmt.Sprintf("claworc-instance-%d", inst.ID),
+		Name:               connectorTokenName(inst),
+		AllowedActions:     allowedActions,
+		AllowedProxies:     allowedProxies,
+		AllowedConnections: allowedConnections,
 	})
 	if err != nil {
 		log.Printf("connector: mint token for instance %d failed: %v", inst.ID, err)
