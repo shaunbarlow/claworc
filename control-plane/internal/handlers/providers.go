@@ -236,12 +236,18 @@ type catalogRootEntry struct {
 // haiku-4-5 -- after Opus 5 and Sonnet 5 shipped), so Anthropic is pinned
 // here, verified directly against Anthropic's own docs
 // (platform.claude.com/docs/en/about-claude/models/overview and .../pricing,
-// checked 2026-08-21). Every other provider keeps coming from the live feed
-// unchanged -- pinning is per-provider, not a wholesale freeze, because nothing
-// here confirms the other 23 entries are also stale.
+// checked 2026-08-21; claude-sonnet-4-6 fallback entry added 2026-08-31,
+// pricing cross-checked against openrouter.ai/anthropic/claude-sonnet-4.6 and
+// apidog.com/blog/claude-sonnet-4-6-pricing). OpenAI is pinned the same way,
+// verified against developers.openai.com/api/docs/models and .../pricing
+// (checked 2026-08-31) -- the live feed's OpenAI entry was still on the 5.2
+// generation. Every other provider keeps coming from the live feed unchanged
+// -- pinning is per-provider, not a wholesale freeze, because nothing here
+// confirms the other entries are also stale.
 //
-// Update this block (and the "checked" date above) when Anthropic ships a new
-// model or changes pricing; there is no live source to sync it from anymore.
+// Update a provider's block (and its "checked" date above) when it ships a
+// new model or changes pricing; there is no live source to sync these two
+// from anymore.
 var hardcodedCatalogOverrides = map[string]catalogRootEntry{
 	"anthropic": {
 		Name:      "anthropic",
@@ -284,6 +290,57 @@ var hardcodedCatalogOverrides = map[string]catalogRootEntry{
 				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
 				InputCost: 5, OutputCost: 25, CachedReadCost: 0.5, CachedWriteCost: 6.25,
 				Tag: "legacy", Description: "Previous-generation Opus, kept for compatibility",
+			},
+			{
+				ModelID: "claude-sonnet-4-6", ModelName: "Claude Sonnet 4.6",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 3, OutputCost: 15, CachedReadCost: 0.3, CachedWriteCost: 3.75,
+				Tag: "legacy", Description: "Previous-generation Sonnet, kept for compatibility",
+			},
+		},
+	},
+	"openai": {
+		Name:      "openai",
+		Label:     "OpenAI",
+		IconKey:   "openai",
+		APIFormat: "openai-completions",
+		BaseURL:   "https://api.openai.com/",
+		Models: []catalogRootModel{
+			{
+				ModelID: "gpt-5.6-sol", ModelName: "GPT-5.6 Sol",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 4, OutputCost: 20, CachedReadCost: 0.4, CachedWriteCost: 5,
+				Tag: "flagship", Description: "Flagship model for complex professional work",
+			},
+			{
+				ModelID: "gpt-5.6-terra", ModelName: "GPT-5.6 Terra",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 2, OutputCost: 12, CachedReadCost: 0.2, CachedWriteCost: 2.5,
+				Tag: "balanced", Description: "Balances intelligence and cost",
+			},
+			{
+				ModelID: "gpt-5.6-luna", ModelName: "GPT-5.6 Luna",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 0.2, OutputCost: 1.2, CachedReadCost: 0.02, CachedWriteCost: 0.25,
+				Tag: "speed", Description: "Optimized for cost-sensitive, high-volume workloads",
+			},
+			{
+				ModelID: "gpt-5.5", ModelName: "GPT-5.5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 5, OutputCost: 30, CachedReadCost: 0.5, CachedWriteCost: 0,
+				Tag: "legacy", Description: "Previous-generation flagship, kept for compatibility",
+			},
+			{
+				ModelID: "gpt-5.4", ModelName: "GPT-5.4",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 2.5, OutputCost: 15, CachedReadCost: 0.25, CachedWriteCost: 0,
+				Tag: "legacy", Description: "Previous-generation model, kept for compatibility",
 			},
 		},
 	},
@@ -1488,4 +1545,3 @@ func GetUsageLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, result)
 }
-
