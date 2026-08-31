@@ -133,9 +133,11 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
   it("can set agents.defaults.model via --json", () => {
     // NOTE: these must be model IDs openclaw's catalog actually recognizes.
     // Dated snapshot-style Claude IDs (e.g. claude-sonnet-4-20250514) were
-    // retired from the 2026.8.1 catalog; use the current alias-style IDs.
+    // retired from the 2026.8.1 catalog. Current canonical family defaults
+    // (extensions/anthropic/claude-model-refs.ts): sonnet -> claude-sonnet-5
+    // (no "4" segment), haiku -> claude-haiku-4-5.
     const modelJson = JSON.stringify({
-      primary: "anthropic/claude-sonnet-4-5",
+      primary: "anthropic/claude-sonnet-5",
       fallbacks: ["anthropic/claude-haiku-4-5"],
     });
 
@@ -151,7 +153,7 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     ]);
     const config = JSON.parse(configResult.stdout);
     expect(config.agents.defaults.model).toEqual({
-      primary: "anthropic/claude-sonnet-4-5",
+      primary: "anthropic/claude-sonnet-5",
       fallbacks: ["anthropic/claude-haiku-4-5"],
     });
   });
