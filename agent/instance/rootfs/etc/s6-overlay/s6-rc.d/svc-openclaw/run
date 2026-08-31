@@ -16,13 +16,30 @@ s6-setuidgid claworc openclaw config set gateway.mode local
 # Newer openclaw rejects host-alias values (e.g. `localhost`) for gateway.bind
 # and demands a bind-mode keyword (lan/loopback/custom/tailnet/auto) instead.
 s6-setuidgid claworc openclaw config set gateway.bind loopback
-# gateway.controlUi.dangerouslyDisableDeviceAuth is retired and fully inert as
-# of the OpenClaw 2.0 (v2026.8.1) config surface -- Control UI browsers pair
-# through the normal device flow regardless of this key's value, and doctor
-# now flags any lingering copy of it as a legacy key needing removal (see
-# https://docs.openclaw.ai/gateway/security#control-ui-over-http). Do not
-# write it here; leave any existing copy on disk for `openclaw doctor --fix`
-# to clean up on an upgraded instance.
+# REGRESSION NOTE (2026-08-31): this write was removed once on the theory
+# that dangerouslyDisableDeviceAuth is "retired and fully inert" per
+# https://docs.openclaw.ai/gateway/security#control-ui-over-http. That claim
+# is accurate for the not-yet-shipped OpenClaw 2.0 (v2026.8.1) docs, but this
+# fleet runs 2026.7.1-2, where the key is still a live, functioning schema
+# field (confirmed in the installed zod schema) that actively gates Control
+# UI device-identity enforcement -- not inert here at all.
+#
+# More fundamentally, the key is load-bearing for Claworc regardless of
+# openclaw version: control-plane's ControlProxy
+# (control-plane/internal/handlers/control.go) is a server-side Go
+# WebSocket proxy with no browser runtime, so it can never generate or
+# present the Ed25519 device identity OpenClaw's normal pairing flow
+# expects from a real browser. Without this bypass, every Claworc-proxied
+# Control UI connection is rejected with "control ui requires device
+# identity (use HTTPS or localhost secure context)" -- broke Shaun's
+# Control UI access on 2026-08-31 the moment the container restarted onto
+# an image built from the commit that dropped this write. Do not remove it
+# again without first replacing Claworc's proxy auth path with something
+# evaluateMissingDeviceIdentity actually accepts for a device-less
+# connection (trusted-proxy auth mode, or an equivalent) -- and re-verify
+# against the openclaw version actually running in this image, not just
+# current docs. See MEMORY.md 2026-08-31 for the full incident writeup.
+s6-setuidgid claworc openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true
 
 # Set Control UI base path for reverse proxy
 if [ -n "$CLAWORC_INSTANCE_ID" ]; then

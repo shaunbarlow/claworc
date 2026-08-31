@@ -20,6 +20,9 @@ exports[`agent image > openclaw.json structure matches snapshot 1`] = `
       "token": "string",
     },
     "bind": "string",
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": "boolean",
+    },
     "mode": "string",
     "port": "number",
     "tailscale": {
