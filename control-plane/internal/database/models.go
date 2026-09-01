@@ -35,6 +35,8 @@ type (
 	UserSSHKey         = models.UserSSHKey
 	WebhookApiKey      = models.WebhookApiKey
 	WebhookLog         = models.WebhookLog
+	SharedSecretSet    = models.SharedSecretSet
+	SecretGrant        = models.SecretGrant
 )
 
 // Helper re-exports keep `database.ParseTeamIDs(...)` etc. working for
@@ -55,3 +57,7 @@ func EncodeSharedFolderInstanceIDs(ids []uint) string {
 func ParseTeamIDs(raw string) []uint { return models.ParseTeamIDs(raw) }
 
 func EncodeTeamIDs(ids []uint) string { return models.EncodeTeamIDs(ids) }
+
+func ParseSecretGrants(raw string) []SecretGrant { return models.ParseSecretGrants(raw) }
+
+func EncodeSecretGrants(grants []SecretGrant) string { return models.EncodeSecretGrants(grants) }

@@ -166,10 +166,58 @@ type Instance struct {
 	// /api/runtime-tokens/:id when the instance is deleted or the connector
 	// feature is turned off for it; the plaintext token itself cannot be
 	// looked back up from the connector's own API once minted.
-	ConnectorTokenID string    `gorm:"default:''" json:"-"`
-	TeamID           uint      `gorm:"not null;default:1;index" json:"team_id"`
-	CreatedAt        time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt        time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ConnectorTokenID string `gorm:"default:''" json:"-"`
+	// SecretGrants is a JSON []SecretGrant array naming the shared OpenBao
+	// secret sets (see SharedSecretSet) this instance is granted access to,
+	// beyond its own always-on, always-read-write agent namespace
+	// (secret/agents/<uuid>/*, implicit and not represented here). Rendered
+	// into the instance's OpenBao policy by
+	// internal/handlers/openbao.go:applyInstanceOpenbaoPolicy. Empty/"[]" =
+	// no shared-set access beyond the agent's own namespace.
+	SecretGrants string `gorm:"type:text;default:'[]'" json:"secret_grants"`
+	// OpenbaoToken is this instance's long-lived, orphaned OpenBao token
+	// (fernet-encrypted at rest), minted once by the control plane and
+	// injected into the container as OPENBAO_TOKEN / OPENBAO_ADDR. The
+	// token's value never changes once minted; only the OpenBao policy
+	// attached to it is rewritten when SecretGrants changes. Empty = the
+	// instance has no OpenBao access yet (feature off, or minting hasn't
+	// happened). See internal/handlers/openbao.go.
+	OpenbaoToken string    `json:"-"`
+	TeamID       uint      `gorm:"not null;default:1;index" json:"team_id"`
+	CreatedAt    time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// SecretGrant names one shared OpenBao secret set an instance is granted
+// access to, and at what capability level.
+type SecretGrant struct {
+	SetName    string `json:"set_name"`
+	Capability string `json:"capability"` // "read" or "write"
+}
+
+// ParseSecretGrants deserializes Instance.SecretGrants. Malformed or empty
+// input yields an empty (non-nil) slice, matching the
+// ParseSharedFolderInstanceIDs convention used elsewhere in this file.
+func ParseSecretGrants(raw string) []SecretGrant {
+	if raw == "" || raw == "[]" {
+		return []SecretGrant{}
+	}
+	var grants []SecretGrant
+	json.Unmarshal([]byte(raw), &grants)
+	if grants == nil {
+		grants = []SecretGrant{}
+	}
+	return grants
+}
+
+// EncodeSecretGrants serializes a []SecretGrant back to its stored JSON
+// form. Never returns an error: json.Marshal cannot fail on this type.
+func EncodeSecretGrants(grants []SecretGrant) string {
+	if grants == nil {
+		grants = []SecretGrant{}
+	}
+	b, _ := json.Marshal(grants)
+	return string(b)
 }
 
 // Team groups instances and users together. A "Default Team" is seeded
@@ -359,6 +407,24 @@ type BackupSchedule struct {
 	NextRunAt      *time.Time `json:"next_run_at,omitempty"`
 	CreatedAt      time.Time  `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt      time.Time  `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+// SharedSecretSet is an admin-created named group of OpenBao secrets,
+// living at the KV v2 path secret/shared/<Name>/*. Instances get access to
+// it (read or write) via their own Instance.SecretGrants entries; the set
+// itself carries no members list — grants are owned by the Instance side,
+// mirroring how SharedFolder.InstanceIDs is the other way around for
+// folders. Created/deleted ad hoc from the Settings UI (see
+// internal/handlers/openbao.go).
+type SharedSecretSet struct {
+	ID uint `gorm:"primaryKey;autoIncrement" json:"id"`
+	// Name is used verbatim as the secret/shared/<Name>/ path segment.
+	// Restricted to a conservative charset at the API layer (see
+	// handlers.validateSecretSetName) to keep paths predictable; OpenBao
+	// itself would tolerate a wider set of characters.
+	Name      string    `gorm:"uniqueIndex;not null" json:"name"`
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 // SharedFolder represents a named shared volume that can be mounted into

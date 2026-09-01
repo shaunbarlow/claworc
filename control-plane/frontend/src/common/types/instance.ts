@@ -67,6 +67,16 @@ export interface Instance {
   affinity: string;
   service_account_annotations: Record<string, string>;
   ports: PortSpec[];
+  /** OpenBao access to named shared secret sets, beyond this agent's own always-RW namespace. */
+  secret_grants: SecretGrant[];
+  /** True once this agent has been minted an OpenBao token (feature on + provisioning completed). */
+  has_openbao_access: boolean;
+}
+
+/** One shared OpenBao secret set grant: read-only or read+write access to secret/shared/<set_name>/*. */
+export interface SecretGrant {
+  set_name: string;
+  capability: "read" | "write";
 }
 
 export interface PortSpec {
@@ -111,6 +121,7 @@ export interface InstanceCreatePayload {
   affinity?: string;
   service_account_annotations?: Record<string, string>;
   ports?: PortSpec[];
+  secret_grants?: SecretGrant[];
 }
 
 export interface Toleration {
@@ -149,6 +160,8 @@ export interface InstanceUpdatePayload {
   affinity?: string;
   service_account_annotations?: Record<string, string>;
   ports?: PortSpec[];
+  /** Full replacement of this agent's shared-secret-set grants (admin only). */
+  secret_grants?: SecretGrant[];
 }
 
 export interface InstanceStats {

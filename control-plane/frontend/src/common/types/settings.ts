@@ -49,6 +49,14 @@ export interface Settings {
   connector_storage: string;
   /** Optional OOMOL_CONNECT_ORIGIN override for OAuth redirect URLs. */
   connector_origin: string;
+  /** Whether Claworc manages a shared OpenBao secrets deployment for agents. Optional -- most setups don't need it. */
+  openbao_enabled: boolean | string;
+  /** OpenBao image reference, e.g. "openbao/openbao:latest". */
+  openbao_image: string;
+  /** Requested storage capacity for OpenBao's data volume, e.g. "1Gi". */
+  openbao_storage: string;
+  /** Names of every configured named shared secret set (for the agent-form/detail grant picker). */
+  openbao_shared_sets: string[];
   /**
    * Only populated on the PUT response when env vars changed: the set of
    * running instances the backend kicked a restart on to apply the change.
@@ -88,6 +96,9 @@ export interface SettingsUpdatePayload {
   connector_image?: string;
   connector_storage?: string;
   connector_origin?: string;
+  openbao_enabled?: boolean | string;
+  openbao_image?: string;
+  openbao_storage?: string;
 }
 
 // Keep backward compat alias

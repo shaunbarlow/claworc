@@ -40,6 +40,8 @@ import {
 } from "@common/hooks/useInstances";
 import { useProviders } from "@common/hooks/useProviders";
 import { useSettings } from "@common/hooks/useSettings";
+import SecretGrantsEditor from "@common/components/SecretGrantsEditor";
+import type { SecretGrant } from "@common/types/instance";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   setInstanceBrowserEnabled,
@@ -1384,6 +1386,19 @@ export default function AgentDetailPage() {
 
           {/* Plugins (per-instance) — install any OpenClaw plugin by spec */}
           <PluginsSection instanceId={instanceId} />
+
+          {/* OpenBao secret access (per-instance, admin only) — only shown
+              when the managed OpenBao deployment is enabled in Settings. */}
+          {isAdmin && (settings?.openbao_enabled === true || settings?.openbao_enabled === "true") && (
+            <SecretGrantsEditor
+              availableSets={settings?.openbao_shared_sets ?? []}
+              grants={instance.secret_grants ?? []}
+              isSaving={updateMutation.isPending}
+              onSave={async (grants: SecretGrant[]) => {
+                await updateMutation.mutateAsync({ id: instanceId, payload: { secret_grants: grants } });
+              }}
+            />
+          )}
 
           {/* Webhook (per-instance) — admins and team managers */}
           <WebhookSection instanceId={instanceId} />

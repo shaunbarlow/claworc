@@ -264,6 +264,12 @@ func main() {
 	// enabled, same reconcile-on-boot rationale as the browser bridge above.
 	handlers.BootApplyConnector()
 
+	// Managed OpenBao deployment: re-apply (and re-unseal) on boot if
+	// previously enabled. Same rationale as BootApplyConnector -- a
+	// control-plane restart must not leave OpenBao sealed until an admin
+	// re-saves Settings.
+	handlers.BootApplyOpenbao()
+
 	// Start background tunnel manager to maintain SSH tunnels for running instances
 	if orch := orchestrator.Get(); orch != nil {
 		tunnelMgr.StartBackgroundManager(ctx, func(ctx context.Context) ([]uint, error) {
@@ -537,6 +543,15 @@ func main() {
 				// currently configured (mutable-tag) image, without touching
 				// connector_enabled. See handlers.UpdateConnectorImage.
 				r.Post("/connector/update-image", handlers.UpdateConnectorImage)
+
+				// Managed OpenBao deployment status (settings PUT handles
+				// enable/configure; see handlers.UpdateSettings).
+				r.Get("/openbao/status", handlers.GetOpenbaoStatus)
+
+				// Named shared OpenBao secret sets (CRUD).
+				r.Get("/openbao/shared-sets", handlers.ListSharedSecretSets)
+				r.Post("/openbao/shared-sets", handlers.CreateSharedSecretSet)
+				r.Delete("/openbao/shared-sets/{id}", handlers.DeleteSharedSecretSet)
 
 				// LLM gateway providers and usage
 				r.Post("/llm/providers/test", handlers.TestProviderKey)

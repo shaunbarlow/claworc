@@ -13,6 +13,7 @@ import SimpleKVEditor from "@common/components/SimpleKVEditor";
 import TolerationsEditor from "@common/components/TolerationsEditor";
 import AffinityEditor from "@common/components/AffinityEditor";
 import PortsEditor from "@common/components/PortsEditor";
+import SecretGrantsEditor from "@common/components/SecretGrantsEditor";
 import StickyActionBar from "@common/components/StickyActionBar";
 import ConfirmDialog from "@common/components/ConfirmDialog";
 import SlackChannelsEditor, {
@@ -23,7 +24,7 @@ import DiscordChannelsEditor, {
   DiscordAllowBotsSelect,
   DiscordDMPolicySelect,
 } from "@common/components/DiscordChannelsEditor";
-import type { InstanceCreatePayload, PortSpec, Toleration } from "@common/types/instance";
+import type { InstanceCreatePayload, PortSpec, SecretGrant, Toleration } from "@common/types/instance";
 import type { SlackChannel } from "@common/types/slack";
 import type { DiscordChannelRule } from "@common/types/discord";
 import type { UserTeamMembership } from "@common/types/auth";
@@ -75,6 +76,8 @@ export default function AgentForm({
 
   const { data: settings } = useSettings();
   const { data: allProviders = [] } = useProviders();
+  const openbaoAvailable = settings?.openbao_enabled === true || settings?.openbao_enabled === "true";
+  const openbaoSharedSets = settings?.openbao_shared_sets ?? [];
   const { isAdmin } = useAuth();
   const { data: health } = useHealth();
   const isKubernetes = health?.orchestrator_backend === "kubernetes";
@@ -139,6 +142,9 @@ export default function AgentForm({
 
   // Per-instance env var overrides (plaintext, encrypted server-side on save)
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
+
+  // OpenBao shared secret set grants (optional; feature may be entirely off)
+  const [secretGrants, setSecretGrants] = useState<SecretGrant[]>([]);
 
   // Slack connection (optional): configured at create time so the agent
   // connects to Slack on first boot. Tokens ride the encrypted env-var path
@@ -210,6 +216,9 @@ export default function AgentForm({
     }
     if (Object.keys(envVars).length > 0) {
       payload.env_vars_set = envVars;
+    }
+    if (secretGrants.length > 0) {
+      payload.secret_grants = secretGrants;
     }
     if (slackEnabled) {
       payload.slack = {
@@ -444,6 +453,16 @@ export default function AgentForm({
         description="Applied to both the agent container and the browser pod. Per-agent values override globals with the same name. Values are encrypted at rest."
         onChange={setEnvVars}
       />
+
+      {/* OpenBao secret grants (optional; only shown when the managed OpenBao deployment is enabled in Settings) */}
+      {openbaoAvailable && (
+        <SecretGrantsEditor
+          inline
+          availableSets={openbaoSharedSets}
+          grants={[]}
+          onChange={setSecretGrants}
+        />
+      )}
 
       {/* Slack */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">

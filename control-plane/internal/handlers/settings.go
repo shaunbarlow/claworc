@@ -15,6 +15,9 @@ var fixedEncryptedSettings = map[string]bool{
 	"brave_api_key":            true,
 	"connector_encryption_key": true,
 	"connector_admin_token":    true,
+	"openbao_root_token":       true,
+	"openbao_unseal_key":       true,
+	"openbao_admin_token":      true,
 }
 
 // plainSettings are returned as-is (not encrypted).
@@ -43,6 +46,9 @@ var plainSettings = []string{
 	"connector_image",
 	"connector_storage",
 	"connector_origin",
+	"openbao_enabled",
+	"openbao_image",
+	"openbao_storage",
 }
 
 func getAllSettings() map[string]string {
@@ -103,6 +109,9 @@ func settingsToResponse(raw map[string]string) map[string]interface{} {
 	// admin-only surface; masking offers no real confidentiality here and the
 	// edit flow needs the live value to diff against.
 	result["default_env_vars"] = EnvVarsForResponse(raw["default_env_vars"])
+
+	// Named OpenBao shared secret sets (admin-managed; see openbao_shared_sets.go).
+	result["openbao_shared_sets"] = listSharedSecretSetNames()
 
 	// Global pod placement settings
 	for _, k := range []string{"default_pod_annotations", "default_node_selector", "default_service_account_annotations"} {
@@ -258,6 +267,38 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if enabled != prevEnabled {
 			applyConnectorAsync(enabled)
+		}
+	}
+
+	// Handle the managed OpenBao deployment. Same shape as connector_enabled
+	// above -- openbao_enabled is the only field with an immediate lifecycle
+	// action; openbao_image/openbao_storage are read fresh on every apply.
+	if v, ok := raw["openbao_enabled"]; ok {
+		strVal, isString := v.(string)
+		boolVal, isBool := v.(bool)
+		var enabled bool
+		switch {
+		case isString:
+			if strVal != "true" && strVal != "false" {
+				writeError(w, http.StatusBadRequest, "openbao_enabled must be true or false")
+				return
+			}
+			enabled = strVal == "true"
+		case isBool:
+			enabled = boolVal
+		default:
+			writeError(w, http.StatusBadRequest, "openbao_enabled must be true or false")
+			return
+		}
+		prev, _ := database.GetSetting("openbao_enabled")
+		prevEnabled := prev == "true"
+		if enabled {
+			database.SetSetting("openbao_enabled", "true")
+		} else {
+			database.SetSetting("openbao_enabled", "false")
+		}
+		if enabled != prevEnabled {
+			applyOpenbaoAsync(enabled)
 		}
 	}
 

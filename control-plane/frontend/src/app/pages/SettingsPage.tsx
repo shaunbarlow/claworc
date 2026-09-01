@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import ProviderIcon from "@common/components/ProviderIcon";
 import ProviderModal from "@common/components/ProviderModal";
@@ -21,6 +22,12 @@ import MemorySettingsEditor from "@common/components/MemorySettingsEditor";
 import ContextEngineSettingsEditor from "@common/components/ContextEngineSettingsEditor";
 import { useHealth } from "@common/hooks/useHealth";
 import { useConnectorStatus } from "@common/hooks/useConnectorStatus";
+import {
+  useOpenbaoStatus,
+  useSharedSecretSets,
+  useCreateSharedSecretSet,
+  useDeleteSharedSecretSet,
+} from "@common/hooks/useOpenbao";
 import StickyActionBar from "@common/components/StickyActionBar";
 import Page from "@common/components/Page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -854,6 +861,16 @@ function MiscTab({
     onError: (err) => errorToast("Failed to update connector image", err),
   });
 
+  const openbaoEnabled = settings.openbao_enabled === true || settings.openbao_enabled === "true";
+  const openbaoStatus = useOpenbaoStatus(openbaoEnabled);
+  const openbaoMutation = useUpdateSettings();
+  const [openbaoImageDraft, setOpenbaoImageDraft] = useState(settings.openbao_image || "");
+  const openbaoImageDirty = openbaoImageDraft !== (settings.openbao_image || "");
+  const sharedSecretSets = useSharedSecretSets();
+  const createSharedSetMutation = useCreateSharedSecretSet();
+  const deleteSharedSetMutation = useDeleteSharedSecretSet();
+  const [newSharedSetName, setNewSharedSetName] = useState("");
+
   return (
     <div className="space-y-8 max-w-2xl">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -1090,6 +1107,153 @@ function MiscTab({
               >
                 Open OpenConnector dashboard →
               </a>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-gray-900">Managed OpenBao (secrets)</h3>
+          <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-700">
+            <input
+              type="checkbox"
+              checked={openbaoEnabled}
+              disabled={openbaoMutation.isPending}
+              onChange={(e) => {
+                openbaoMutation.mutate(
+                  { openbao_enabled: e.target.checked ? "true" : "false" },
+                  {
+                    onSuccess: () =>
+                      successToast(
+                        e.target.checked
+                          ? "Managed OpenBao enabled — the service is starting up and will auto-initialize."
+                          : "Managed OpenBao disabled. Its data volume and stored credentials are kept, so re-enabling won't need re-initialization.",
+                      ),
+                    onError: (err) => errorToast("Failed to update OpenBao setting", err),
+                  },
+                );
+              }}
+            />
+            Enabled
+          </label>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Optional. Runs a single shared, self-hosted OpenBao instance for agents that need managed
+          secret storage. Most setups don't need this — leave it off unless an agent actually needs
+          it. Each agent gets its own always-on read/write secret namespace, plus optional read or
+          read/write access to named shared secret sets you create below.
+        </p>
+        {openbaoEnabled && (
+          <div className="bg-gray-50 border border-gray-200 rounded-md p-3 space-y-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">Status:</span>
+              {openbaoStatus.isLoading && <span className="text-gray-400">Loading…</span>}
+              {openbaoStatus.data && (
+                <span
+                  className={
+                    openbaoStatus.data.status === "running"
+                      ? "text-green-700 font-medium"
+                      : openbaoStatus.data.status === "error"
+                        ? "text-red-600 font-medium"
+                        : "text-amber-600 font-medium"
+                  }
+                >
+                  {openbaoStatus.data.status}
+                </span>
+              )}
+              {openbaoStatus.data?.status === "running" && openbaoStatus.data.sealed && (
+                <span className="text-amber-600">(sealed — auto-unsealing)</span>
+              )}
+              {openbaoStatus.data?.status === "running" && !openbaoStatus.data.configured && (
+                <span className="text-amber-600">(initializing…)</span>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Image</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={openbaoImageDraft}
+                  onChange={(e) => setOpenbaoImageDraft(e.target.value)}
+                  placeholder="openbao/openbao:latest"
+                  className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {openbaoImageDirty && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openbaoMutation.mutate(
+                        { openbao_image: openbaoImageDraft },
+                        {
+                          onSuccess: () => successToast("OpenBao image updated"),
+                          onError: (err) => errorToast("Failed to update OpenBao image", err),
+                        },
+                      )
+                    }
+                    disabled={openbaoMutation.isPending}
+                    className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Saved changes take effect on the next re-apply (toggling the feature off/on, or a
+                control plane restart).
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-gray-200">
+              <h4 className="text-xs font-medium text-gray-700 mb-1">Shared secret sets</h4>
+              <p className="text-xs text-gray-400 mb-2">
+                Named groups of secrets that agents can be granted read or read/write access to,
+                from each agent's own settings page.
+              </p>
+              {sharedSecretSets.data && sharedSecretSets.data.length > 0 && (
+                <div className="divide-y divide-gray-200 border-y border-gray-200 mb-2">
+                  {sharedSecretSets.data.map((s) => (
+                    <div key={s.id} className="py-1.5 flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono text-gray-900">{s.name}</span>
+                      <button
+                        type="button"
+                        title="Delete"
+                        onClick={() => deleteSharedSetMutation.mutate(s.id)}
+                        disabled={deleteSharedSetMutation.isPending}
+                        className="p-1 text-gray-400 hover:text-red-600 disabled:opacity-50"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newSharedSetName}
+                  onChange={(e) => setNewSharedSetName(e.target.value)}
+                  placeholder="e.g. shared-github-creds"
+                  className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newSharedSetName.trim()) return;
+                    createSharedSetMutation.mutate(newSharedSetName.trim(), {
+                      onSuccess: () => setNewSharedSetName(""),
+                    });
+                  }}
+                  disabled={createSharedSetMutation.isPending || !newSharedSetName.trim()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Plus size={12} />
+                  Add
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Lowercase letters, numbers, and hyphens only, starting with a letter.
+              </p>
             </div>
           </div>
         )}

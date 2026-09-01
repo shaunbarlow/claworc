@@ -138,6 +138,11 @@ type instanceCreateRequest struct {
 	// semantics as the placement fields above.
 	ServiceAccountAnnotations *map[string]string       `json:"service_account_annotations"`
 	Ports                     *[]orchestrator.PortSpec `json:"ports"`
+	// SecretGrants configures this instance's OpenBao access to named shared
+	// secret sets (in addition to its own always-on agent namespace) at
+	// creation time (admin only). Empty/omitted = no shared-set access
+	// beyond the agent's own namespace.
+	SecretGrants []database.SecretGrant `json:"secret_grants"`
 }
 
 type modelsResponse struct {
@@ -198,6 +203,8 @@ type instanceResponse struct {
 	Affinity                  string                    `json:"affinity"`
 	ServiceAccountAnnotations map[string]string         `json:"service_account_annotations"`
 	Ports                     []orchestrator.PortSpec   `json:"ports"`
+	SecretGrants              []database.SecretGrant    `json:"secret_grants"`
+	HasOpenbaoAccess          bool                      `json:"has_openbao_access"`
 }
 
 func generateName(displayName string) string {
@@ -580,6 +587,8 @@ func instanceToResponse(inst database.Instance, status string) instanceResponse 
 		Affinity:                  inst.Affinity,
 		ServiceAccountAnnotations: serviceAccountAnnotations,
 		Ports:                     ports,
+		SecretGrants:              database.ParseSecretGrants(inst.SecretGrants),
+		HasOpenbaoAccess:          inst.OpenbaoToken != "",
 	}
 }
 
@@ -797,6 +806,11 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 	// the env-drift check. This only ever renders a token the instance row
 	// already has.
 	for k, v := range buildConnectorEnvVars(&inst) {
+		envVars[k] = v
+	}
+	// OpenBao address + this instance's long-lived token. Same
+	// read-only/DB-only contract as buildConnectorEnvVars above.
+	for k, v := range buildOpenbaoEnvVars(&inst) {
 		envVars[k] = v
 	}
 
@@ -1191,6 +1205,27 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 	serviceAccountAnnotations := overrideJSON(body.ServiceAccountAnnotations, defaultServiceAccountAnnotations)
 	ports := overrideJSON(body.Ports, defaultPorts)
 
+	// OpenBao secret grants (admin only, same posture as EnabledProviders --
+	// this decides what secrets the agent can read/write). Non-admins
+	// creating an instance simply get no grants, same as if they'd sent
+	// nothing; only explicit non-empty input from an admin is honored.
+	var secretGrantsJSON string
+	if len(body.SecretGrants) > 0 {
+		if caller == nil || caller.Role != "admin" {
+			writeError(w, http.StatusForbidden, "Only admins can set secret grants")
+			return
+		}
+		for _, g := range body.SecretGrants {
+			if g.Capability != "read" && g.Capability != "write" {
+				writeError(w, http.StatusBadRequest, "secret grant capability must be \"read\" or \"write\"")
+				return
+			}
+		}
+		secretGrantsJSON = database.EncodeSecretGrants(body.SecretGrants)
+	} else {
+		secretGrantsJSON = database.EncodeSecretGrants(nil)
+	}
+
 	inst := database.Instance{
 		Name:                      name,
 		DisplayName:               body.DisplayName,
@@ -1227,6 +1262,7 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 		Affinity:                  affinity,
 		ServiceAccountAnnotations: serviceAccountAnnotations,
 		Ports:                     ports,
+		SecretGrants:              secretGrantsJSON,
 	}
 
 	if err := database.DB.Create(&inst).Error; err != nil {
@@ -1310,6 +1346,11 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			// failure here only means the agent boots without connector
 			// access this time - not a create failure.
 			ensureInstanceConnectorToken(ctx, &fresh)
+			// Same reasoning for OpenBao: mint a long-lived token + policy
+			// (from any secret_grants sent at creation) before building the
+			// spec, if the feature is enabled and this instance doesn't have
+			// one yet. Best-effort.
+			ensureInstanceOpenbaoToken(ctx, &fresh)
 
 			// buildCreateParams is the single source of truth for CreateParams
 			// (it merges global + per-instance env vars, then applies the
@@ -1480,6 +1521,10 @@ type instanceUpdateRequest struct {
 	Affinity                  *string                    `json:"affinity"`                    // admin only; raw JSON
 	ServiceAccountAnnotations *map[string]string         `json:"service_account_annotations"` // admin only
 	Ports                     *[]orchestrator.PortSpec   `json:"ports"`                       // admin only
+	// SecretGrants configures this instance's OpenBao access to named shared
+	// secret sets (admin only). nil = leave unchanged; an explicit (including
+	// empty) slice replaces the set.
+	SecretGrants *[]database.SecretGrant `json:"secret_grants"`
 }
 
 func UpdateInstance(w http.ResponseWriter, r *http.Request) {
@@ -1799,6 +1844,33 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 			b, _ := json.Marshal(*body.Ports)
 			database.DB.Model(&inst).Update("ports", string(b))
 			placementChanged = true
+		}
+	}
+
+	// Update OpenBao secret grants (admin only, matching EnabledProviders'
+	// posture: this widens/narrows what secrets an agent can read/write, a
+	// privileged decision). Rewriting the instance's OpenBao policy takes
+	// effect immediately server-side -- no container restart needed, since
+	// the token itself never changes on a pure grant edit (see
+	// applyInstanceOpenbaoPolicy's doc comment).
+	if body.SecretGrants != nil {
+		user := middleware.GetUser(r)
+		if user == nil || user.Role != "admin" {
+			writeError(w, http.StatusForbidden, "Only admins can configure secret grants")
+			return
+		}
+		grants := *body.SecretGrants
+		for _, g := range grants {
+			if g.Capability != "read" && g.Capability != "write" {
+				writeError(w, http.StatusBadRequest, "secret grant capability must be \"read\" or \"write\"")
+				return
+			}
+		}
+		encoded := database.EncodeSecretGrants(grants)
+		database.DB.Model(&inst).Update("secret_grants", encoded)
+		inst.SecretGrants = encoded
+		if err := applyInstanceOpenbaoPolicy(r.Context(), &inst); err != nil {
+			log.Printf("instance %d: apply openbao policy failed: %v", inst.ID, err)
 		}
 	}
 
