@@ -33,3 +33,19 @@ export async function createSharedSecretSet(name: string): Promise<SharedSecretS
 export async function deleteSharedSecretSet(id: number): Promise<void> {
   await client.delete(`/openbao/shared-sets/${id}`);
 }
+export interface ResetOpenbaoTokensResult {
+  instances: number;
+  reminted: number;
+  revoked: number;
+  failed: number;
+}
+
+/**
+ * Revokes and re-mints every agent's OpenBao token. Needed after a change
+ * that only applies at mint time (e.g. the token TTL ceiling), since tokens
+ * are otherwise issued once and kept for their whole lifetime.
+ */
+export async function resetOpenbaoTokens(): Promise<ResetOpenbaoTokensResult> {
+  const { data } = await client.post<ResetOpenbaoTokensResult>("/openbao/reset-tokens");
+  return data;
+}

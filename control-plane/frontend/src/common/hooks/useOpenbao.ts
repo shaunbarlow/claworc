@@ -4,6 +4,7 @@ import {
   deleteSharedSecretSet,
   fetchOpenbaoStatus,
   fetchSharedSecretSets,
+  resetOpenbaoTokens,
 } from "@common/api/openbao";
 import { successToast, errorToast } from "@common/utils/toast";
 
@@ -46,5 +47,19 @@ export function useDeleteSharedSecretSet() {
       successToast("Shared secret set deleted");
     },
     onError: (err) => errorToast("Failed to delete shared secret set", err),
+  });
+}
+
+export function useResetOpenbaoTokens() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: resetOpenbaoTokens,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["openbao-status"] });
+      qc.invalidateQueries({ queryKey: ["instances"] });
+      const failed = res.failed > 0 ? `, ${res.failed} failed` : "";
+      successToast(`Re-minted ${res.reminted} of ${res.instances} agent tokens${failed}`);
+    },
+    onError: (err) => errorToast("Failed to reset agent tokens", err),
   });
 }

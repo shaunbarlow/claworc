@@ -87,6 +87,33 @@ func (c *AdminClient) Unseal(ctx context.Context, key string) error {
 	return c.do(ctx, http.MethodPut, "/v1/sys/unseal", body, &resp, false)
 }
 
+// TuneTokenMaxTTL raises the max_lease_ttl of the token auth mount to ttl.
+// Required for any token to outlive OpenBao's 768h (32 day) default: a
+// create request asking for more is silently capped to the mount maximum
+// rather than rejected, and neither explicit_max_ttl nor a periodic token
+// escapes that ceiling -- tuning the mount is the only thing that does.
+// Idempotent, and must run before minting any token that needs the longer
+// life, since the cap is applied at creation time and never revisited.
+//
+// Requires "sudo" on sys/auth/token/tune (see openbaoAdminPolicyDocument);
+// in practice this is called with the root token during bootstrap.
+func (c *AdminClient) TuneTokenMaxTTL(ctx context.Context, ttl string) error {
+	body, _ := json.Marshal(map[string]string{"max_lease_ttl": ttl})
+	return c.do(ctx, http.MethodPost, "/v1/sys/auth/token/tune", body, nil, true)
+}
+
+// RevokeToken revokes a token by its value, invalidating it immediately.
+// Used when dropping and re-minting an instance's token so the old one
+// cannot continue to be used for the remainder of its (very long) TTL.
+// Needs only "update" on auth/token/revoke -- not a sudo path.
+//
+// Revoking an already-revoked or expired token is reported by OpenBao as a
+// plain success, so callers can treat this as idempotent.
+func (c *AdminClient) RevokeToken(ctx context.Context, token string) error {
+	body, _ := json.Marshal(map[string]string{"token": token})
+	return c.do(ctx, http.MethodPost, "/v1/auth/token/revoke", body, nil, true)
+}
+
 // EnsureKVv2Mount enables the KV v2 secret engine at path "secret/" if it is
 // not already mounted. Idempotent.
 func (c *AdminClient) EnsureKVv2Mount(ctx context.Context) error {

@@ -548,6 +548,12 @@ func main() {
 				// enable/configure; see handlers.UpdateSettings).
 				r.Get("/openbao/status", handlers.GetOpenbaoStatus)
 
+				// Revoke + re-mint every agent's OpenBao token. Needed after
+				// a change that only takes effect at mint time (token TTL,
+				// or a compromised token), since tokens are otherwise minted
+				// once and kept for their whole lifetime.
+				r.Post("/openbao/reset-tokens", handlers.ResetOpenbaoTokens)
+
 				// Named shared OpenBao secret sets (CRUD).
 				r.Get("/openbao/shared-sets", handlers.ListSharedSecretSets)
 				r.Post("/openbao/shared-sets", handlers.CreateSharedSecretSet)

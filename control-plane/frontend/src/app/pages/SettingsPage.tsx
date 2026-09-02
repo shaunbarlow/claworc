@@ -27,6 +27,7 @@ import {
   useSharedSecretSets,
   useCreateSharedSecretSet,
   useDeleteSharedSecretSet,
+  useResetOpenbaoTokens,
 } from "@common/hooks/useOpenbao";
 import StickyActionBar from "@common/components/StickyActionBar";
 import Page from "@common/components/Page";
@@ -870,6 +871,8 @@ function MiscTab({
   const createSharedSetMutation = useCreateSharedSecretSet();
   const deleteSharedSetMutation = useDeleteSharedSecretSet();
   const [newSharedSetName, setNewSharedSetName] = useState("");
+  const resetTokensMutation = useResetOpenbaoTokens();
+  const [confirmResetTokens, setConfirmResetTokens] = useState(false);
 
   return (
     <div className="space-y-8 max-w-2xl">
@@ -1254,6 +1257,42 @@ function MiscTab({
               <p className="text-xs text-gray-400 mt-1">
                 Lowercase letters, numbers, and hyphens only, starting with a letter.
               </p>
+            </div>
+
+            <div className="pt-2 border-t border-gray-200">
+              <h4 className="text-xs font-medium text-gray-700 mb-1">Agent tokens</h4>
+              <p className="text-xs text-gray-400 mb-2">
+                Each agent holds a long-lived token minted once, so changes that only apply when a
+                token is created won't reach tokens already issued. Dropping them revokes every
+                agent's token immediately and mints a replacement. Running agents are restarted to
+                pick up the new value.
+              </p>
+              <button
+                type="button"
+                onClick={() => setConfirmResetTokens(true)}
+                disabled={resetTokensMutation.isPending || !openbaoStatus.data?.configured}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={resetTokensMutation.isPending ? "animate-spin" : ""} />
+                {resetTokensMutation.isPending ? "Re-minting…" : "Drop & re-mint agent tokens"}
+              </button>
+              {!openbaoStatus.data?.configured && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Available once OpenBao has finished initializing.
+                </p>
+              )}
+              {confirmResetTokens && (
+                <ConfirmDialog
+                  title="Drop and re-mint agent tokens?"
+                  message="Every agent's current OpenBao token is revoked immediately and replaced with a new one. Any running agent is restarted to receive it, and an agent mid-task will lose access to OpenBao until it comes back. Secrets already stored in OpenBao are not affected."
+                  confirmLabel="Drop & Re-mint"
+                  onCancel={() => setConfirmResetTokens(false)}
+                  onConfirm={() => {
+                    setConfirmResetTokens(false);
+                    resetTokensMutation.mutate();
+                  }}
+                />
+              )}
             </div>
           </div>
         )}

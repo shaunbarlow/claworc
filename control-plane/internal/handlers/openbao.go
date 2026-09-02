@@ -186,26 +186,39 @@ func ensureOpenbaoInitialized(ctx context.Context, mgr *openbaoprov.Manager) err
 		}
 	}
 
+	// The root token is needed on every boot, not just the first: it is the
+	// only credential permitted to rewrite the admin policy and tune the
+	// token mount, and both of those have to be kept current.
+	rootToken, err := utils.Decrypt(rootTokenRaw)
+	if err != nil || rootToken == "" {
+		return fmt.Errorf("decrypt root token: %w", err)
+	}
+	root := openbaoprov.NewAdminClient(host, port, rootToken)
+
+	// Re-push the admin policy unconditionally. OpenBao resolves a token's
+	// policies by name on every request, so rewriting the policy under the
+	// same name upgrades the capabilities of an already-minted admin token
+	// in place, with no re-mint and no change to what is stored in settings.
+	// Without this, a deployment that bootstrapped against an older
+	// openbaoAdminPolicyDocument would keep its stale capabilities forever,
+	// since the mint below runs only once -- which is exactly how the
+	// missing bare "sys/mounts" grant survived a redeploy.
+	if err := root.PutPolicy(ctx, openbaoAdminPolicyName, openbaoAdminPolicyDocument); err != nil {
+		return fmt.Errorf("write admin policy: %w", err)
+	}
+
+	// Must precede every mint below: the mount's max_lease_ttl caps a token's
+	// TTL at creation time and is never revisited, so a token minted before
+	// this ran keeps the old ceiling until it is re-minted.
+	if err := root.TuneTokenMaxTTL(ctx, openbaoTokenTTL); err != nil {
+		return fmt.Errorf("tune token max ttl: %w", err)
+	}
+
 	adminTokenRaw, _ := database.GetSetting("openbao_admin_token")
 	if adminTokenRaw != "" {
-		// Already bootstrapped past this point on a previous run. Re-push the
-		// admin policy before using the token: OpenBao resolves a token's
-		// policies by name on every request, so rewriting the policy under
-		// the same name upgrades the capabilities of the already-minted
-		// token in place, with no re-mint and no change to what is stored in
-		// settings. Without this, a deployment that bootstrapped against an
-		// older openbaoAdminPolicyDocument would keep its stale capabilities
-		// forever, since the mint path below never runs again -- which is
-		// exactly how the missing bare "sys/mounts" grant survived a
-		// redeploy.
-		rootToken, err := utils.Decrypt(rootTokenRaw)
-		if err != nil || rootToken == "" {
-			return fmt.Errorf("decrypt root token: %w", err)
-		}
-		root := openbaoprov.NewAdminClient(host, port, rootToken)
-		if err := root.PutPolicy(ctx, openbaoAdminPolicyName, openbaoAdminPolicyDocument); err != nil {
-			return fmt.Errorf("refresh admin policy: %w", err)
-		}
+		// Already bootstrapped past this point on a previous run; the policy
+		// refresh and mount tune above were the only outstanding work, so
+		// all that is left is to confirm the KV mount (cheap, idempotent).
 		adminToken, err := utils.Decrypt(adminTokenRaw)
 		if err != nil || adminToken == "" {
 			return fmt.Errorf("decrypt admin token: %w", err)
@@ -214,18 +227,10 @@ func ensureOpenbaoInitialized(ctx context.Context, mgr *openbaoprov.Manager) err
 		return admin.EnsureKVv2Mount(ctx)
 	}
 
-	// First-time bootstrap of the admin policy + orphan admin token, using
-	// the root token exactly once. Per Shaun's 2026-09-01 decision the root
-	// token itself is kept in settings for recovery purposes even though it
-	// is not used again after this point in normal operation.
-	rootToken, err := utils.Decrypt(rootTokenRaw)
-	if err != nil || rootToken == "" {
-		return fmt.Errorf("decrypt root token: %w", err)
-	}
-	root := openbaoprov.NewAdminClient(host, port, rootToken)
-	if err := root.PutPolicy(ctx, openbaoAdminPolicyName, openbaoAdminPolicyDocument); err != nil {
-		return fmt.Errorf("create admin policy: %w", err)
-	}
+	// First-time bootstrap of the orphan admin token. Per Shaun's
+	// 2026-09-01 decision the root token itself is kept in settings for
+	// recovery purposes even though it is not used again in normal
+	// operation beyond the policy/tune maintenance above.
 	adminToken, err := root.CreateOrphanToken(ctx, []string{openbaoAdminPolicyName}, openbaoTokenTTL, false)
 	if err != nil {
 		return fmt.Errorf("mint admin token: %w", err)
@@ -274,6 +279,17 @@ path "sys/mounts" {
 # leaving every agent tokenless.
 path "auth/token/create-orphan" {
   capabilities = ["create", "update", "sudo"]
+}
+# Revoking an agent's old token when it is dropped and re-minted. Plain
+# write path, no sudo needed.
+path "auth/token/revoke" {
+  capabilities = ["create", "update"]
+}
+# Raising the token mount's max_lease_ttl so openbaoTokenTTL is honoured
+# instead of silently capped at the 768h default. sudo-protected, like
+# every sys/auth path.
+path "sys/auth/token/tune" {
+  capabilities = ["read", "update", "sudo"]
 }
 `
 
@@ -517,4 +533,72 @@ func GetOpenbaoStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ResetOpenbaoTokens handles POST /api/v1/openbao/reset-tokens (admin-only):
+// revokes every instance's OpenBao token, clears it from the database, then
+// mints a fresh one and propagates it to any running container.
+//
+// The reason this exists as an explicit admin action rather than something
+// the bootstrap does on its own: a token's TTL is fixed at creation time and
+// ensureInstanceOpenbaoToken deliberately only mints when a row has no token
+// at all, so tokens already issued under an older policy or a lower mount
+// max_lease_ttl keep those properties for their whole (long) life. Dropping
+// them is the only way to re-issue.
+//
+// Revocation is best-effort per instance and does not abort the run: a token
+// OpenBao no longer recognises (already revoked, or from a wiped OpenBao
+// volume) must not be able to block the re-mint that replaces it.
+func ResetOpenbaoTokens(w http.ResponseWriter, r *http.Request) {
+	if !openbaoEnabled() {
+		writeError(w, http.StatusBadRequest, "OpenBao is not enabled")
+		return
+	}
+	client, ok := resolvedOpenbaoAdminClient(r.Context())
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "OpenBao is not ready yet")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), openbaoApplyTimeout)
+	defer cancel()
+
+	var instances []database.Instance
+	database.DB.Find(&instances)
+
+	var reminted, revoked, failed int
+	for i := range instances {
+		inst := instances[i]
+		if inst.OpenbaoToken != "" {
+			if plain, err := utils.Decrypt(inst.OpenbaoToken); err == nil && plain != "" {
+				if err := client.RevokeToken(ctx, plain); err != nil {
+					log.Printf("openbao: revoke old token for instance %d failed (continuing): %v", inst.ID, err)
+				} else {
+					revoked++
+				}
+			}
+			if err := database.DB.Model(&database.Instance{}).Where("id = ?", inst.ID).
+				Update("openbao_token", "").Error; err != nil {
+				log.Printf("openbao: clear token for instance %d failed: %v", inst.ID, err)
+				failed++
+				continue
+			}
+			inst.OpenbaoToken = ""
+		}
+		// Mints unconditionally now that the row has no token, and rewrites
+		// the instance policy on the way through.
+		if !ensureInstanceOpenbaoToken(ctx, &inst) {
+			failed++
+			continue
+		}
+		reminted++
+		EnsureEnvPropagated(ctx, inst, 0, "OPENBAO_TOKEN", "OPENBAO_ADDR")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"instances": len(instances),
+		"reminted":  reminted,
+		"revoked":   revoked,
+		"failed":    failed,
+	})
 }
