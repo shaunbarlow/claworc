@@ -144,6 +144,13 @@ type instanceCreateRequest struct {
 	// creation time (admin only). Empty/omitted = no shared-set access
 	// beyond the agent's own namespace.
 	SecretGrants []database.SecretGrant `json:"secret_grants"`
+	// ConnectorMCPEnabled/ConnectorAdminAccessEnabled opt this instance into
+	// the managed OpenConnector integration at creation time (both admin
+	// only, same posture as SecretGrants above -- these decide what this
+	// agent can reach). Omitted/false = no connector access, matching the
+	// strict-opt-in default (see Instance.ConnectorMCPEnabled).
+	ConnectorMCPEnabled         bool `json:"connector_mcp_enabled"`
+	ConnectorAdminAccessEnabled bool `json:"connector_admin_access_enabled"`
 }
 
 type modelsResponse struct {
@@ -153,59 +160,62 @@ type modelsResponse struct {
 }
 
 type instanceResponse struct {
-	ID                        uint                      `json:"id"`
-	Name                      string                    `json:"name"`
-	DisplayName               string                    `json:"display_name"`
-	Status                    string                    `json:"status"`
-	CPURequest                string                    `json:"cpu_request"`
-	CPULimit                  string                    `json:"cpu_limit"`
-	MemoryRequest             string                    `json:"memory_request"`
-	MemoryLimit               string                    `json:"memory_limit"`
-	StorageHomebrew           string                    `json:"storage_homebrew"`
-	StorageHome               string                    `json:"storage_home"`
-	HasBraveOverride          bool                      `json:"has_brave_override"`
-	SearchProvider            string                    `json:"search_provider"` // "" = inherit
-	EffectiveSearchProvider   string                    `json:"effective_search_provider"`
-	Models                    *modelsResponse           `json:"models"`
-	DefaultModel              string                    `json:"default_model"`
-	ContainerImage            *string                   `json:"container_image"`
-	HasImageOverride          bool                      `json:"has_image_override"`
-	VNCResolution             *string                   `json:"vnc_resolution"`
-	HasResolutionOverride     bool                      `json:"has_resolution_override"`
-	Timezone                  *string                   `json:"timezone"`
-	HasTimezoneOverride       bool                      `json:"has_timezone_override"`
-	UserAgent                 *string                   `json:"user_agent"`
-	HasUserAgentOverride      bool                      `json:"has_user_agent_override"`
-	EnvVars                   map[string]string         `json:"env_vars"`
-	HasEnvOverride            bool                      `json:"has_env_override"`
-	RequiresRestart           bool                      `json:"requires_restart,omitempty"`
-	Restarting                bool                      `json:"restarting,omitempty"`
-	LiveImageInfo             *string                   `json:"live_image_info,omitempty"`
-	StatusMessage             string                    `json:"status_message,omitempty"`
-	AllowedSourceIPs          string                    `json:"allowed_source_ips"`
-	EnabledProviders          []uint                    `json:"enabled_providers"`
-	InstanceProviders         []providerResp            `json:"instance_providers"`
-	ControlURL                string                    `json:"control_url"`
-	GatewayToken              string                    `json:"gateway_token"`
-	SortOrder                 int                       `json:"sort_order"`
-	CreatedAt                 string                    `json:"created_at"`
-	UpdatedAt                 string                    `json:"updated_at"`
-	IsLegacyEmbedded          bool                      `json:"is_legacy_embedded"`
-	BrowserProvider           string                    `json:"browser_provider,omitempty"`
-	BrowserImage              string                    `json:"browser_image,omitempty"`
-	BrowserIdleMinutes        *int                      `json:"browser_idle_minutes,omitempty"`
-	BrowserStorage            string                    `json:"browser_storage,omitempty"`
-	BrowserActive             bool                      `json:"browser_active"`
-	BrowserEnabled            bool                      `json:"browser_enabled"`
-	TeamID                    uint                      `json:"team_id"`
-	PodAnnotations            map[string]string         `json:"pod_annotations"`
-	NodeSelector              map[string]string         `json:"node_selector"`
-	Tolerations               []orchestrator.Toleration `json:"tolerations"`
-	Affinity                  string                    `json:"affinity"`
-	ServiceAccountAnnotations map[string]string         `json:"service_account_annotations"`
-	Ports                     []orchestrator.PortSpec   `json:"ports"`
-	SecretGrants              []database.SecretGrant    `json:"secret_grants"`
-	HasOpenbaoAccess          bool                      `json:"has_openbao_access"`
+	ID                          uint                      `json:"id"`
+	Name                        string                    `json:"name"`
+	DisplayName                 string                    `json:"display_name"`
+	Status                      string                    `json:"status"`
+	CPURequest                  string                    `json:"cpu_request"`
+	CPULimit                    string                    `json:"cpu_limit"`
+	MemoryRequest               string                    `json:"memory_request"`
+	MemoryLimit                 string                    `json:"memory_limit"`
+	StorageHomebrew             string                    `json:"storage_homebrew"`
+	StorageHome                 string                    `json:"storage_home"`
+	HasBraveOverride            bool                      `json:"has_brave_override"`
+	SearchProvider              string                    `json:"search_provider"` // "" = inherit
+	EffectiveSearchProvider     string                    `json:"effective_search_provider"`
+	Models                      *modelsResponse           `json:"models"`
+	DefaultModel                string                    `json:"default_model"`
+	ContainerImage              *string                   `json:"container_image"`
+	HasImageOverride            bool                      `json:"has_image_override"`
+	VNCResolution               *string                   `json:"vnc_resolution"`
+	HasResolutionOverride       bool                      `json:"has_resolution_override"`
+	Timezone                    *string                   `json:"timezone"`
+	HasTimezoneOverride         bool                      `json:"has_timezone_override"`
+	UserAgent                   *string                   `json:"user_agent"`
+	HasUserAgentOverride        bool                      `json:"has_user_agent_override"`
+	EnvVars                     map[string]string         `json:"env_vars"`
+	HasEnvOverride              bool                      `json:"has_env_override"`
+	RequiresRestart             bool                      `json:"requires_restart,omitempty"`
+	Restarting                  bool                      `json:"restarting,omitempty"`
+	LiveImageInfo               *string                   `json:"live_image_info,omitempty"`
+	StatusMessage               string                    `json:"status_message,omitempty"`
+	AllowedSourceIPs            string                    `json:"allowed_source_ips"`
+	EnabledProviders            []uint                    `json:"enabled_providers"`
+	InstanceProviders           []providerResp            `json:"instance_providers"`
+	ControlURL                  string                    `json:"control_url"`
+	GatewayToken                string                    `json:"gateway_token"`
+	SortOrder                   int                       `json:"sort_order"`
+	CreatedAt                   string                    `json:"created_at"`
+	UpdatedAt                   string                    `json:"updated_at"`
+	IsLegacyEmbedded            bool                      `json:"is_legacy_embedded"`
+	BrowserProvider             string                    `json:"browser_provider,omitempty"`
+	BrowserImage                string                    `json:"browser_image,omitempty"`
+	BrowserIdleMinutes          *int                      `json:"browser_idle_minutes,omitempty"`
+	BrowserStorage              string                    `json:"browser_storage,omitempty"`
+	BrowserActive               bool                      `json:"browser_active"`
+	BrowserEnabled              bool                      `json:"browser_enabled"`
+	TeamID                      uint                      `json:"team_id"`
+	PodAnnotations              map[string]string         `json:"pod_annotations"`
+	NodeSelector                map[string]string         `json:"node_selector"`
+	Tolerations                 []orchestrator.Toleration `json:"tolerations"`
+	Affinity                    string                    `json:"affinity"`
+	ServiceAccountAnnotations   map[string]string         `json:"service_account_annotations"`
+	Ports                       []orchestrator.PortSpec   `json:"ports"`
+	SecretGrants                []database.SecretGrant    `json:"secret_grants"`
+	HasOpenbaoAccess            bool                      `json:"has_openbao_access"`
+	ConnectorMCPEnabled         bool                      `json:"connector_mcp_enabled"`
+	ConnectorAdminAccessEnabled bool                      `json:"connector_admin_access_enabled"`
+	HasConnectorAccess          bool                      `json:"has_connector_access"`
 }
 
 func generateName(displayName string) string {
@@ -595,56 +605,59 @@ func instanceToResponse(inst database.Instance, status string) instanceResponse 
 	}
 
 	return instanceResponse{
-		ID:                        inst.ID,
-		Name:                      inst.Name,
-		DisplayName:               inst.DisplayName,
-		Status:                    status,
-		StatusMessage:             getStatusMessage(inst.ID),
-		CPURequest:                inst.CPURequest,
-		CPULimit:                  inst.CPULimit,
-		MemoryRequest:             inst.MemoryRequest,
-		MemoryLimit:               inst.MemoryLimit,
-		StorageHomebrew:           inst.StorageHomebrew,
-		StorageHome:               inst.StorageHome,
-		HasBraveOverride:          inst.BraveAPIKey != "",
-		SearchProvider:            inst.SearchProvider,
-		EffectiveSearchProvider:   effectiveSearchProvider(&inst),
-		Models:                    &modelsResponse{Effective: effective, DisabledDefaults: mc.Disabled, Extra: mc.Extra},
-		DefaultModel:              inst.DefaultModel,
-		ContainerImage:            containerImage,
-		HasImageOverride:          inst.ContainerImage != "",
-		VNCResolution:             vncResolution,
-		HasResolutionOverride:     inst.VNCResolution != "",
-		Timezone:                  timezone,
-		HasTimezoneOverride:       inst.Timezone != "",
-		UserAgent:                 userAgent,
-		HasUserAgentOverride:      inst.UserAgent != "",
-		EnvVars:                   envVarsPlain,
-		HasEnvOverride:            len(envVarsPlain) > 0,
-		AllowedSourceIPs:          inst.AllowedSourceIPs,
-		EnabledProviders:          enabledProviders,
-		InstanceProviders:         instProviderResps,
-		ControlURL:                fmt.Sprintf("/openclaw/%d/", inst.ID),
-		GatewayToken:              gatewayToken,
-		SortOrder:                 inst.SortOrder,
-		CreatedAt:                 formatTimestamp(inst.CreatedAt),
-		UpdatedAt:                 formatTimestamp(inst.UpdatedAt),
-		IsLegacyEmbedded:          database.IsLegacyEmbedded(getEffectiveImage(inst)),
-		BrowserProvider:           inst.BrowserProvider,
-		BrowserImage:              inst.BrowserImage,
-		BrowserIdleMinutes:        inst.BrowserIdleMinutes,
-		BrowserStorage:            inst.BrowserStorage,
-		BrowserActive:             inst.BrowserActive,
-		BrowserEnabled:            inst.BrowserEnabled,
-		TeamID:                    inst.TeamID,
-		PodAnnotations:            podAnnotations,
-		NodeSelector:              nodeSelector,
-		Tolerations:               tolerations,
-		Affinity:                  inst.Affinity,
-		ServiceAccountAnnotations: serviceAccountAnnotations,
-		Ports:                     ports,
-		SecretGrants:              database.ParseSecretGrants(inst.SecretGrants),
-		HasOpenbaoAccess:          inst.OpenbaoToken != "",
+		ID:                          inst.ID,
+		Name:                        inst.Name,
+		DisplayName:                 inst.DisplayName,
+		Status:                      status,
+		StatusMessage:               getStatusMessage(inst.ID),
+		CPURequest:                  inst.CPURequest,
+		CPULimit:                    inst.CPULimit,
+		MemoryRequest:               inst.MemoryRequest,
+		MemoryLimit:                 inst.MemoryLimit,
+		StorageHomebrew:             inst.StorageHomebrew,
+		StorageHome:                 inst.StorageHome,
+		HasBraveOverride:            inst.BraveAPIKey != "",
+		SearchProvider:              inst.SearchProvider,
+		EffectiveSearchProvider:     effectiveSearchProvider(&inst),
+		Models:                      &modelsResponse{Effective: effective, DisabledDefaults: mc.Disabled, Extra: mc.Extra},
+		DefaultModel:                inst.DefaultModel,
+		ContainerImage:              containerImage,
+		HasImageOverride:            inst.ContainerImage != "",
+		VNCResolution:               vncResolution,
+		HasResolutionOverride:       inst.VNCResolution != "",
+		Timezone:                    timezone,
+		HasTimezoneOverride:         inst.Timezone != "",
+		UserAgent:                   userAgent,
+		HasUserAgentOverride:        inst.UserAgent != "",
+		EnvVars:                     envVarsPlain,
+		HasEnvOverride:              len(envVarsPlain) > 0,
+		AllowedSourceIPs:            inst.AllowedSourceIPs,
+		EnabledProviders:            enabledProviders,
+		InstanceProviders:           instProviderResps,
+		ControlURL:                  fmt.Sprintf("/openclaw/%d/", inst.ID),
+		GatewayToken:                gatewayToken,
+		SortOrder:                   inst.SortOrder,
+		CreatedAt:                   formatTimestamp(inst.CreatedAt),
+		UpdatedAt:                   formatTimestamp(inst.UpdatedAt),
+		IsLegacyEmbedded:            database.IsLegacyEmbedded(getEffectiveImage(inst)),
+		BrowserProvider:             inst.BrowserProvider,
+		BrowserImage:                inst.BrowserImage,
+		BrowserIdleMinutes:          inst.BrowserIdleMinutes,
+		BrowserStorage:              inst.BrowserStorage,
+		BrowserActive:               inst.BrowserActive,
+		BrowserEnabled:              inst.BrowserEnabled,
+		TeamID:                      inst.TeamID,
+		PodAnnotations:              podAnnotations,
+		NodeSelector:                nodeSelector,
+		Tolerations:                 tolerations,
+		Affinity:                    inst.Affinity,
+		ServiceAccountAnnotations:   serviceAccountAnnotations,
+		Ports:                       ports,
+		SecretGrants:                database.ParseSecretGrants(inst.SecretGrants),
+		HasOpenbaoAccess:            inst.OpenbaoToken != "",
+		ConnectorMCPEnabled:         inst.ConnectorMCPEnabled,
+		ConnectorAdminAccessEnabled: inst.ConnectorAdminAccessEnabled,
+		HasConnectorAccess:          inst.ConnectorRuntimeToken != "",
 	}
 }
 
@@ -862,6 +875,13 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 	// the env-drift check. This only ever renders a token the instance row
 	// already has.
 	for k, v := range buildConnectorEnvVars(&inst) {
+		envVars[k] = v
+	}
+	// OpenConnector admin bearer token, only when this instance's own
+	// opt-in (ConnectorAdminAccessEnabled) is on -- independent of, and a
+	// materially bigger grant than, buildConnectorEnvVars' scoped runtime
+	// token above. Same read-only/DB-only contract.
+	for k, v := range buildConnectorAdminEnvVars(&inst) {
 		envVars[k] = v
 	}
 	// OpenBao address + this instance's long-lived token. Same
@@ -1282,43 +1302,57 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 		secretGrantsJSON = database.EncodeSecretGrants(nil)
 	}
 
+	// OpenConnector opt-ins (admin only, same posture as SecretGrants --
+	// ConnectorAdminAccessEnabled in particular hands the agent the shared
+	// connector's admin bearer token, a materially bigger grant than a
+	// scoped runtime token). Non-admins creating an instance simply get
+	// neither opt-in, same as if they'd sent nothing.
+	if body.ConnectorMCPEnabled || body.ConnectorAdminAccessEnabled {
+		if caller == nil || caller.Role != "admin" {
+			writeError(w, http.StatusForbidden, "Only admins can enable OpenConnector access")
+			return
+		}
+	}
+
 	inst := database.Instance{
-		Name:                      name,
-		DisplayName:               body.DisplayName,
-		Status:                    "creating",
-		CPURequest:                body.CPURequest,
-		CPULimit:                  body.CPULimit,
-		MemoryRequest:             body.MemoryRequest,
-		MemoryLimit:               body.MemoryLimit,
-		StorageHomebrew:           body.StorageHomebrew,
-		StorageHome:               body.StorageHome,
-		BraveAPIKey:               encBraveKey,
-		SearchProvider:            searchProvider,
-		ContainerImage:            containerImage,
-		VNCResolution:             vncResolution,
-		Timezone:                  timezone,
-		UserAgent:                 userAgent,
-		GatewayToken:              encGatewayToken,
-		ModelsConfig:              modelsConfigJSON,
-		DefaultModel:              body.DefaultModel,
-		EnabledProviders:          string(enabledProvidersJSON),
-		EnvVars:                   envVarsJSON,
-		SlackConfig:               slackConfigJSON,
-		DiscordConfig:             discordConfigJSON,
-		SortOrder:                 maxSortOrder + 1,
-		BrowserProvider:           browserProvider,
-		BrowserImage:              browserImage,
-		BrowserIdleMinutes:        browserIdleMinutes,
-		BrowserStorage:            browserStorage,
-		BrowserEnabled:            browserEnabled,
-		TeamID:                    teamID,
-		PodAnnotations:            podAnnotations,
-		NodeSelector:              nodeSelector,
-		Tolerations:               tolerations,
-		Affinity:                  affinity,
-		ServiceAccountAnnotations: serviceAccountAnnotations,
-		Ports:                     ports,
-		SecretGrants:              secretGrantsJSON,
+		Name:                        name,
+		DisplayName:                 body.DisplayName,
+		Status:                      "creating",
+		ConnectorMCPEnabled:         body.ConnectorMCPEnabled,
+		ConnectorAdminAccessEnabled: body.ConnectorAdminAccessEnabled,
+		CPURequest:                  body.CPURequest,
+		CPULimit:                    body.CPULimit,
+		MemoryRequest:               body.MemoryRequest,
+		MemoryLimit:                 body.MemoryLimit,
+		StorageHomebrew:             body.StorageHomebrew,
+		StorageHome:                 body.StorageHome,
+		BraveAPIKey:                 encBraveKey,
+		SearchProvider:              searchProvider,
+		ContainerImage:              containerImage,
+		VNCResolution:               vncResolution,
+		Timezone:                    timezone,
+		UserAgent:                   userAgent,
+		GatewayToken:                encGatewayToken,
+		ModelsConfig:                modelsConfigJSON,
+		DefaultModel:                body.DefaultModel,
+		EnabledProviders:            string(enabledProvidersJSON),
+		EnvVars:                     envVarsJSON,
+		SlackConfig:                 slackConfigJSON,
+		DiscordConfig:               discordConfigJSON,
+		SortOrder:                   maxSortOrder + 1,
+		BrowserProvider:             browserProvider,
+		BrowserImage:                browserImage,
+		BrowserIdleMinutes:          browserIdleMinutes,
+		BrowserStorage:              browserStorage,
+		BrowserEnabled:              browserEnabled,
+		TeamID:                      teamID,
+		PodAnnotations:              podAnnotations,
+		NodeSelector:                nodeSelector,
+		Tolerations:                 tolerations,
+		Affinity:                    affinity,
+		ServiceAccountAnnotations:   serviceAccountAnnotations,
+		Ports:                       ports,
+		SecretGrants:                secretGrantsJSON,
 	}
 
 	if err := database.DB.Create(&inst).Error; err != nil {
@@ -1464,6 +1498,11 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			// the resolved defaults + overrides. BRAVE_API_KEY itself already rode
 			// the container env via buildCreateParams above.
 			applySearchConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, &inst)
+			// Seed mcp.servers.open-connector when this instance opted into
+			// ConnectorMCPEnabled at creation and a token was minted above (see
+			// ensureInstanceConnectorToken(ctx, &fresh) call before buildCreateParams);
+			// no-ops (unsets, harmlessly) otherwise.
+			applyConnectorMCPConfig(ctx, sshproxy.NewSSHInstance(sshClient), inst.Name, &inst)
 
 			// Final catch for the provisioning window. Everything written to
 			// the row before the spec was built is already in the container
@@ -1581,6 +1620,11 @@ type instanceUpdateRequest struct {
 	// secret sets (admin only). nil = leave unchanged; an explicit (including
 	// empty) slice replaces the set.
 	SecretGrants *[]database.SecretGrant `json:"secret_grants"`
+	// ConnectorMCPEnabled/ConnectorAdminAccessEnabled (admin only) opt this
+	// instance into/out of the managed OpenConnector integration. nil = leave
+	// unchanged.
+	ConnectorMCPEnabled         *bool `json:"connector_mcp_enabled"`
+	ConnectorAdminAccessEnabled *bool `json:"connector_admin_access_enabled"`
 }
 
 func UpdateInstance(w http.ResponseWriter, r *http.Request) {
@@ -1928,6 +1972,48 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 		if err := applyInstanceOpenbaoPolicy(r.Context(), &inst); err != nil {
 			log.Printf("instance %d: apply openbao policy failed: %v", inst.ID, err)
 		}
+	}
+
+	// Update OpenConnector opt-ins (admin only, matching SecretGrants'
+	// posture -- ConnectorAdminAccessEnabled in particular hands the agent
+	// the shared connector's own admin bearer token, a materially bigger
+	// grant than a scoped runtime token). Toggling either needs an env-var
+	// drift check (OOMOL_CONNECT_* only reaches the container on
+	// (re)create); toggling ConnectorMCPEnabled additionally needs an SSH
+	// push/unset of mcp.servers.open-connector, since that lives in the
+	// agent's own OpenClaw config, not the container env.
+	connectorEnvChanged := false
+	connectorMCPChanged := false
+	if body.ConnectorMCPEnabled != nil || body.ConnectorAdminAccessEnabled != nil {
+		user := middleware.GetUser(r)
+		if user == nil || user.Role != "admin" {
+			writeError(w, http.StatusForbidden, "Only admins can configure OpenConnector access")
+			return
+		}
+	}
+	if body.ConnectorMCPEnabled != nil && *body.ConnectorMCPEnabled != inst.ConnectorMCPEnabled {
+		database.DB.Model(&inst).Update("connector_mcp_enabled", *body.ConnectorMCPEnabled)
+		inst.ConnectorMCPEnabled = *body.ConnectorMCPEnabled
+		connectorEnvChanged = true
+		connectorMCPChanged = true
+	}
+	if body.ConnectorAdminAccessEnabled != nil && *body.ConnectorAdminAccessEnabled != inst.ConnectorAdminAccessEnabled {
+		database.DB.Model(&inst).Update("connector_admin_access_enabled", *body.ConnectorAdminAccessEnabled)
+		inst.ConnectorAdminAccessEnabled = *body.ConnectorAdminAccessEnabled
+		connectorEnvChanged = true
+	}
+	if connectorEnvChanged {
+		// Mint (opted in) or revoke (opted out) the runtime token to match
+		// the new ConnectorMCPEnabled state before checking env drift, so the
+		// drift check sees the token this save is supposed to produce.
+		ensureInstanceConnectorToken(r.Context(), &inst)
+		if EnsureEnvPropagated(r.Context(), inst, callerID(r),
+			"OOMOL_CONNECT_RUNTIME_TOKEN", "OPEN_CONNECTOR_BASE_URL", "OOMOL_CONNECT_ADMIN_TOKEN") {
+			log.Printf("instance %d: restarting to apply updated OpenConnector env", inst.ID)
+		}
+	}
+	if connectorMCPChanged {
+		pushConnectorMCPConfig(inst.ID, inst.Name)
 	}
 
 	// Re-fetch

@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gluk-w/claworc/control-plane/internal/config"
+	"github.com/gluk-w/claworc/control-plane/internal/connectorprov"
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 )
@@ -265,5 +268,167 @@ func TestDefaultConnectorTokenPolicy_MatchesCuratedServiceList(t *testing.T) {
 		if want := svc + ".*"; allowedActions[i] != want {
 			t.Errorf("allowedActions[%d] = %q, want %q", i, allowedActions[i], want)
 		}
+	}
+}
+
+func TestBuildConnectorAdminEnvVars_EmptyUnlessOptedIn(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+	if _, err := ensureConnectorSecrets(); err != nil {
+		t.Fatalf("ensureConnectorSecrets: %v", err)
+	}
+
+	// Feature on, but this instance did not opt into admin access.
+	inst := &database.Instance{ID: 10}
+	if env := buildConnectorAdminEnvVars(inst); len(env) != 0 {
+		t.Errorf("expected no admin env vars without ConnectorAdminAccessEnabled, got %+v", env)
+	}
+
+	// Opted in, but the feature itself is off.
+	database.SetSetting("connector_enabled", "false")
+	inst2 := &database.Instance{ID: 11, ConnectorAdminAccessEnabled: true}
+	if env := buildConnectorAdminEnvVars(inst2); len(env) != 0 {
+		t.Errorf("expected no admin env vars while connector_enabled=false, got %+v", env)
+	}
+}
+
+func TestBuildConnectorAdminEnvVars_RendersAdminTokenWhenOptedIn(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+	if _, err := ensureConnectorSecrets(); err != nil {
+		t.Fatalf("ensureConnectorSecrets: %v", err)
+	}
+	cfg, ok := resolvedConnectorConfig()
+	if !ok {
+		t.Fatalf("expected resolvedConnectorConfig to report ok")
+	}
+
+	inst := &database.Instance{ID: 12, ConnectorAdminAccessEnabled: true}
+	env := buildConnectorAdminEnvVars(inst)
+	if env["OOMOL_CONNECT_ADMIN_TOKEN"] != cfg.AdminToken {
+		t.Errorf("OOMOL_CONNECT_ADMIN_TOKEN = %q, want the resolved admin token", env["OOMOL_CONNECT_ADMIN_TOKEN"])
+	}
+	if env["OPEN_CONNECTOR_BASE_URL"] == "" {
+		t.Errorf("expected OPEN_CONNECTOR_BASE_URL to be set")
+	}
+}
+
+func TestBuildConnectorMCPConfig_NotOkWithoutOptInOrToken(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+
+	enc, err := utils.Encrypt("a-runtime-token")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// Has a token, but never opted into ConnectorMCPEnabled.
+	inst := &database.Instance{ID: 20, ConnectorRuntimeToken: enc}
+	if _, ok := buildConnectorMCPConfig(inst); ok {
+		t.Errorf("expected not-ok without ConnectorMCPEnabled")
+	}
+
+	// Opted in, but no token minted yet.
+	inst2 := &database.Instance{ID: 21, ConnectorMCPEnabled: true}
+	if _, ok := buildConnectorMCPConfig(inst2); ok {
+		t.Errorf("expected not-ok without a minted token")
+	}
+
+	// Opted in and has a token, but the feature is off.
+	database.SetSetting("connector_enabled", "false")
+	inst3 := &database.Instance{ID: 22, ConnectorMCPEnabled: true, ConnectorRuntimeToken: enc}
+	if _, ok := buildConnectorMCPConfig(inst3); ok {
+		t.Errorf("expected not-ok while connector_enabled=false")
+	}
+}
+
+func TestBuildConnectorMCPConfig_RendersStreamableHTTPServerWhenOptedIn(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+
+	enc, err := utils.Encrypt("plaintext-runtime-token")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	inst := &database.Instance{ID: 23, ConnectorMCPEnabled: true, ConnectorRuntimeToken: enc}
+
+	cfg, ok := buildConnectorMCPConfig(inst)
+	if !ok {
+		t.Fatalf("expected ok once opted in with a minted token")
+	}
+	if cfg["transport"] != "streamable-http" {
+		t.Errorf("transport = %v, want streamable-http", cfg["transport"])
+	}
+	wantURL := fmt.Sprintf("http://%s:%d/mcp", connectorprov.WorkloadName, connectorContainerPortForEnv)
+	if cfg["url"] != wantURL {
+		t.Errorf("url = %v, want %v", cfg["url"], wantURL)
+	}
+	if cfg["connectionTimeoutMs"] != 10000 || cfg["requestTimeoutMs"] != 30000 {
+		t.Errorf("unexpected timeouts: %+v", cfg)
+	}
+	headers, ok := cfg["headers"].(map[string]string)
+	if !ok {
+		t.Fatalf("headers has unexpected type %T", cfg["headers"])
+	}
+	if headers["Authorization"] != "Bearer plaintext-runtime-token" {
+		t.Errorf("Authorization header = %q, want Bearer plaintext-runtime-token", headers["Authorization"])
+	}
+}
+
+func TestEnsureInstanceConnectorToken_NoOpWhenNotOptedIn(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+	if _, err := ensureConnectorSecrets(); err != nil {
+		t.Fatalf("ensureConnectorSecrets: %v", err)
+	}
+
+	inst := database.Instance{Name: "bot-x", DisplayName: "Bot X", ConnectorMCPEnabled: false}
+	if err := database.DB.Create(&inst).Error; err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	if minted := ensureInstanceConnectorToken(context.Background(), &inst); minted {
+		t.Errorf("expected no mint/change for an instance that never opted in")
+	}
+	if inst.ConnectorRuntimeToken != "" || inst.ConnectorTokenID != "" {
+		t.Errorf("expected instance to remain without a token, got token=%q tokenID=%q", inst.ConnectorRuntimeToken, inst.ConnectorTokenID)
+	}
+}
+
+func TestEnsureInstanceConnectorToken_RevokesOnOptOut(t *testing.T) {
+	setupSettingsTest(t)
+	database.SetSetting("connector_enabled", "true")
+
+	enc, err := utils.Encrypt("stale-token")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	inst := database.Instance{
+		Name:                  "bot-y",
+		DisplayName:           "Bot Y",
+		ConnectorMCPEnabled:   false, // opted out (or never opted in post-migration)
+		ConnectorRuntimeToken: enc,
+		ConnectorTokenID:      "rec-123",
+	}
+	if err := database.DB.Create(&inst).Error; err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	// No orchestrator configured in this test process, so the connector-side
+	// revoke call itself no-ops (best-effort) -- what matters here is that the
+	// local row is cleared regardless.
+	if changed := ensureInstanceConnectorToken(context.Background(), &inst); !changed {
+		t.Errorf("expected ensureInstanceConnectorToken to report a change when clearing a stale token")
+	}
+	if inst.ConnectorRuntimeToken != "" || inst.ConnectorTokenID != "" {
+		t.Errorf("expected token fields cleared, got token=%q tokenID=%q", inst.ConnectorRuntimeToken, inst.ConnectorTokenID)
+	}
+
+	var reloaded database.Instance
+	if err := database.DB.First(&reloaded, inst.ID).Error; err != nil {
+		t.Fatalf("reload instance: %v", err)
+	}
+	if reloaded.ConnectorRuntimeToken != "" || reloaded.ConnectorTokenID != "" {
+		t.Errorf("expected persisted token fields cleared, got token=%q tokenID=%q", reloaded.ConnectorRuntimeToken, reloaded.ConnectorTokenID)
 	}
 }

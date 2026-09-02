@@ -71,6 +71,12 @@ export interface Instance {
   secret_grants: SecretGrant[];
   /** True once this agent has been minted an OpenBao token (feature on + provisioning completed). */
   has_openbao_access: boolean;
+  /** Per-agent opt-in: mint an OpenConnector runtime token and register it as an MCP server (mcp.servers.open-connector). Off by default -- admin only. */
+  connector_mcp_enabled: boolean;
+  /** Per-agent opt-in: inject the shared connector's own admin bearer token into this agent's env (OOMOL_CONNECT_ADMIN_TOKEN). Bigger grant than connector_mcp_enabled -- admin only. */
+  connector_admin_access_enabled: boolean;
+  /** True once this agent has been minted an OpenConnector runtime token (connector_mcp_enabled + provisioning completed). */
+  has_connector_access: boolean;
 }
 
 /** One shared OpenBao secret set grant: read-only or read+write access to secret/shared/<set_name>/*. */
@@ -122,6 +128,10 @@ export interface InstanceCreatePayload {
   service_account_annotations?: Record<string, string>;
   ports?: PortSpec[];
   secret_grants?: SecretGrant[];
+  /** Opt this agent into the managed OpenConnector integration at creation time (admin only). */
+  connector_mcp_enabled?: boolean;
+  /** Opt this agent into having the connector's admin token injected into its env at creation time (admin only). */
+  connector_admin_access_enabled?: boolean;
 }
 
 export interface Toleration {
@@ -162,6 +172,10 @@ export interface InstanceUpdatePayload {
   ports?: PortSpec[];
   /** Full replacement of this agent's shared-secret-set grants (admin only). */
   secret_grants?: SecretGrant[];
+  /** Opt this agent into/out of the managed OpenConnector integration (admin only). */
+  connector_mcp_enabled?: boolean;
+  /** Opt this agent into/out of having the connector's admin token injected into its env (admin only). */
+  connector_admin_access_enabled?: boolean;
 }
 
 export interface InstanceStats {

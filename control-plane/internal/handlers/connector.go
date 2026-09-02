@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/gluk-w/claworc/control-plane/internal/connectorprov"
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/orchestrator"
+	"github.com/gluk-w/claworc/control-plane/internal/sshproxy"
 	"github.com/gluk-w/claworc/control-plane/internal/taskmanager"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 )
@@ -183,6 +185,123 @@ func buildConnectorEnvVars(inst *database.Instance) map[string]string {
 	return out
 }
 
+// buildConnectorAdminEnvVars returns the env vars buildCreateParams should
+// inject for an instance's opt-in OpenConnector *admin* access
+// (Instance.ConnectorAdminAccessEnabled): the shared connector's own admin
+// bearer token, letting the agent call OpenConnector's admin API directly
+// (e.g. to manage its own runtime tokens/policy) instead of only the scoped
+// runtime token buildConnectorEnvVars carries.
+//
+// Deliberately independent of ConnectorMCPEnabled/buildConnectorEnvVars:
+// admin access is a materially bigger grant (full admin control of the
+// shared connector, not just this agent's own scoped token) so it is its
+// own opt-in rather than implied by the MCP one. Read-only and
+// side-effect-free, like buildConnectorEnvVars, so it is safe to call from
+// the env-drift check as well as from a real (re)create.
+func buildConnectorAdminEnvVars(inst *database.Instance) map[string]string {
+	out := map[string]string{}
+	if !connectorEnabled() || !inst.ConnectorAdminAccessEnabled {
+		return out
+	}
+	cfg, ok := resolvedConnectorConfig()
+	if !ok || cfg.AdminToken == "" {
+		return out
+	}
+	out["OOMOL_CONNECT_ADMIN_TOKEN"] = cfg.AdminToken
+	out["OPEN_CONNECTOR_BASE_URL"] = fmt.Sprintf("http://%s:%d", connectorprov.WorkloadName, connectorContainerPortForEnv)
+	return out
+}
+
+// connectorMCPServerName is the config key Claworc registers the managed
+// connector under in an opted-in instance's own OpenClaw config, i.e.
+// mcp.servers.open-connector.
+const connectorMCPServerName = "open-connector"
+
+// buildConnectorMCPConfig resolves the mcp.servers.open-connector subtree
+// Claworc pushes into an instance's own OpenClaw config once it has opted
+// into ConnectorMCPEnabled and been minted a token, carrying the instance's
+// own scoped runtime token as a static Authorization header (see
+// docs/cli/mcp.md's SSE/HTTP transport `headers` field). OpenConnector's
+// /mcp endpoint accepts a runtime-scoped bearer the same way its REST API
+// does (see the fork's server/api/auth.go path classification for /mcp).
+//
+// ok=false means there is nothing to push yet: feature off, this instance
+// hasn't opted in, or no token has been minted yet (self-heals the next
+// time ensureInstanceConnectorToken succeeds and this is called again).
+func buildConnectorMCPConfig(inst *database.Instance) (cfg map[string]interface{}, ok bool) {
+	if !connectorEnabled() || !inst.ConnectorMCPEnabled || inst.ConnectorRuntimeToken == "" {
+		return nil, false
+	}
+	plain, err := utils.Decrypt(inst.ConnectorRuntimeToken)
+	if err != nil || plain == "" {
+		return nil, false
+	}
+	return map[string]interface{}{
+		"url":       fmt.Sprintf("http://%s:%d/mcp", connectorprov.WorkloadName, connectorContainerPortForEnv),
+		"transport": "streamable-http",
+		"headers": map[string]string{
+			"Authorization": "Bearer " + plain,
+		},
+		"connectionTimeoutMs": 10000,
+		"requestTimeoutMs":    30000,
+	}, true
+}
+
+// applyConnectorMCPConfig reconciles an instance's mcp.servers.open-connector
+// OpenClaw config over SSH, in both directions: writes it when the instance
+// has opted in and has a live token, clears it otherwise (never opted in,
+// opted back out, feature disabled, or the token was revoked). Mirrors
+// applySearchConfig's bidirectional reconcile pattern. Best-effort: failures
+// are logged, not returned, same as the rest of this integration.
+func applyConnectorMCPConfig(ctx context.Context, agent sshproxy.Instance, name string, inst *database.Instance) {
+	name = utils.SanitizeForLog(name)
+	cfg, ok := buildConnectorMCPConfig(inst)
+	if !ok {
+		_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "unset", "mcp.servers."+connectorMCPServerName)
+		if err != nil {
+			log.Printf("connector-mcp: %s: unset mcp server: %v", name, err)
+			return
+		}
+		if code != 0 && !strings.Contains(stderr, "Config path not found") {
+			log.Printf("connector-mcp: %s: unset mcp server failed: %s", name, utils.SanitizeForLog(stderr))
+		}
+		return
+	}
+	payload, err := json.Marshal(cfg)
+	if err != nil {
+		log.Printf("connector-mcp: %s: marshal mcp server config: %v", name, err)
+		return
+	}
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "mcp.servers."+connectorMCPServerName, string(payload), "--replace", "--json")
+	if err != nil {
+		log.Printf("connector-mcp: %s: set mcp server: %v", name, err)
+		return
+	}
+	if code != 0 {
+		log.Printf("connector-mcp: %s: set mcp server failed: %s", name, utils.SanitizeForLog(stderr))
+	}
+}
+
+// pushConnectorMCPConfig is the async best-effort wrapper around
+// applyConnectorMCPConfig for a running instance, mirroring pushSearchConfig.
+func pushConnectorMCPConfig(instanceID uint, name string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), searchConfigSSHWait)
+		defer cancel()
+		sshClient, err := SSHMgr.WaitForSSH(ctx, instanceID, searchConfigSSHWait)
+		if err != nil {
+			log.Printf("connector-mcp: %s: could not get SSH connection to push mcp config: %v", utils.SanitizeForLog(name), err)
+			return
+		}
+		var inst database.Instance
+		if err := database.DB.First(&inst, instanceID).Error; err != nil {
+			log.Printf("connector-mcp: %s: could not re-read instance %d: %v", utils.SanitizeForLog(name), instanceID, err)
+			return
+		}
+		applyConnectorMCPConfig(ctx, sshproxy.NewSSHInstance(sshClient), name, &inst)
+	}()
+}
+
 // connectorTestOnlyServices lists the no_auth (no credential/API key setup
 // required) provider services granted to every freshly minted instance
 // token by default. This is deliberately narrow: Level 1 has no Claworc UI
@@ -296,11 +415,38 @@ func syncConnectorTokenNameAndPolicy(ctx context.Context, inst *database.Instanc
 	return true
 }
 
+// revokeInstanceConnectorTokenIfPresent clears inst's minted OpenConnector
+// runtime token when present, revoking it at the connector first
+// (best-effort). Called from ensureInstanceConnectorToken whenever the
+// instance isn't (or is no longer) opted in via ConnectorMCPEnabled, so
+// turning that opt-in off actually revokes the grant rather than merely
+// leaving an unused token sitting at the connector. Returns true if a token
+// was cleared -- the caller then knows the container env / MCP config need
+// to be reconciled away, same as a freshly minted token needs reconciling
+// in.
+func revokeInstanceConnectorTokenIfPresent(ctx context.Context, inst *database.Instance) bool {
+	if inst.ConnectorRuntimeToken == "" && inst.ConnectorTokenID == "" {
+		return false
+	}
+	revokeInstanceConnectorToken(ctx, *inst)
+	if err := database.DB.Model(&database.Instance{}).Where("id = ?", inst.ID).Updates(map[string]interface{}{
+		"connector_runtime_token": "",
+		"connector_token_id":      "",
+	}).Error; err != nil {
+		log.Printf("connector: clear token for instance %d failed: %v", inst.ID, err)
+	}
+	inst.ConnectorRuntimeToken = ""
+	inst.ConnectorTokenID = ""
+	return true
+}
+
 // ensureInstanceConnectorToken mints a scoped OpenConnector runtime token for
-// inst if the feature is enabled and it doesn't already have one, persisting
-// it (encrypted) onto the row and updating inst in place. Returns true when a
-// token was freshly minted (the caller then knows the container needs the
-// new env var, i.e. treat it like any other env-var drift).
+// inst if the feature is enabled, this instance has opted in
+// (ConnectorMCPEnabled), and it doesn't already have one, persisting it
+// (encrypted) onto the row and updating inst in place. Returns true when a
+// token was freshly minted, revoked, or cleared (the caller then knows the
+// container/MCP config needs to be reconciled, i.e. treat it like any other
+// env-var drift).
 //
 // The minted token carries connectorTokenName's descriptive label and
 // defaultConnectorTokenPolicy's restrictive default grant (a curated set of
@@ -316,8 +462,12 @@ func syncConnectorTokenNameAndPolicy(ctx context.Context, inst *database.Instanc
 // called it -- the agent simply boots without connector access this time
 // and picks up a token on the next call once the connector is reachable.
 func ensureInstanceConnectorToken(ctx context.Context, inst *database.Instance) (minted bool) {
-	if !connectorEnabled() {
-		return false
+	if !connectorEnabled() || !inst.ConnectorMCPEnabled {
+		// Feature off globally, or this instance hasn't opted in (default
+		// for every instance now -- see Instance.ConnectorMCPEnabled).
+		// Revoke/clear anything left over from before the opt-in existed or
+		// from this instance opting back out.
+		return revokeInstanceConnectorTokenIfPresent(ctx, inst)
 	}
 	// If token already exists, sync its name and policy to canonical state
 	if inst.ConnectorRuntimeToken != "" {
@@ -396,13 +546,18 @@ func revokeInstanceConnectorToken(ctx context.Context, inst database.Instance) {
 	}
 }
 
-// pushConnectorTokensForRunningInstances mints tokens for every instance that
-// doesn't have one yet and restarts any running instance whose live container
-// env has drifted from the database (new token minted, or the feature was
-// just turned on). Mirrors pushSearchConfigForRunningInstances /
-// UpdateSettings's env-var cascade: called once when connector_enabled flips
-// on so existing instances don't have to be individually edited to pick up
-// connector access.
+// pushConnectorTokensForRunningInstances mints/revokes tokens for every
+// instance to match its own ConnectorMCPEnabled opt-in and restarts any
+// running instance whose live container env has drifted from the database
+// (new token minted, revoked, or the feature was just turned on). Mirrors
+// pushSearchConfigForRunningInstances / UpdateSettings's env-var cascade:
+// called once when connector_enabled flips on so already-opted-in instances
+// don't have to be individually edited to pick up connector access.
+//
+// Since ConnectorMCPEnabled became a per-instance opt-in, this only mints a
+// token for instances that already have it set (e.g. from creation) --
+// flipping the global connector_enabled setting no longer implicitly opts
+// every instance in.
 func pushConnectorTokensForRunningInstances() {
 	var instances []database.Instance
 	database.DB.Find(&instances)
@@ -411,7 +566,8 @@ func pushConnectorTokensForRunningInstances() {
 	for i := range instances {
 		inst := instances[i]
 		ensureInstanceConnectorToken(ctx, &inst)
-		EnsureEnvPropagated(ctx, inst, 0, "OOMOL_CONNECT_RUNTIME_TOKEN", "OPEN_CONNECTOR_BASE_URL")
+		EnsureEnvPropagated(ctx, inst, 0, "OOMOL_CONNECT_RUNTIME_TOKEN", "OPEN_CONNECTOR_BASE_URL", "OOMOL_CONNECT_ADMIN_TOKEN")
+		pushConnectorMCPConfig(inst.ID, inst.Name)
 	}
 }
 

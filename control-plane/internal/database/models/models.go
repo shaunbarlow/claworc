@@ -167,6 +167,31 @@ type Instance struct {
 	// feature is turned off for it; the plaintext token itself cannot be
 	// looked back up from the connector's own API once minted.
 	ConnectorTokenID string `gorm:"default:''" json:"-"`
+	// ConnectorMCPEnabled is the per-instance opt-in for the managed
+	// OpenConnector integration. Before this field existed, every instance
+	// got a scoped runtime token the moment connector_enabled was turned on
+	// globally; that is no longer the default -- an operator now has to opt
+	// each agent in individually. When true (and connector_enabled is also
+	// on), the control plane mints a scoped runtime token for this instance
+	// (see ensureInstanceConnectorToken) and registers it as an MCP server
+	// (mcp.servers.open-connector) in the agent's own OpenClaw config (see
+	// buildConnectorMCPConfig/applyConnectorMCPConfig), so the agent can call
+	// OpenConnector actions as MCP tools. When false, any previously minted
+	// token is revoked and the MCP server entry is removed. Defaults to
+	// false.
+	ConnectorMCPEnabled bool `gorm:"not null;default:false" json:"connector_mcp_enabled"`
+	// ConnectorAdminAccessEnabled is a second, independent per-instance
+	// opt-in: when true (and connector_enabled is also on), the shared
+	// connector's own admin bearer token is injected into this instance's
+	// container as OOMOL_CONNECT_ADMIN_TOKEN, letting the agent itself call
+	// OpenConnector's admin API directly (e.g. to manage its own runtime
+	// tokens/policy) instead of only the scoped grant
+	// ConnectorMCPEnabled's runtime token carries. This is a materially
+	// bigger blast radius -- full admin control of the shared connector,
+	// not just this agent's own scoped grant -- so it is a separate opt-in
+	// rather than implied by ConnectorMCPEnabled. Defaults to false. See
+	// buildConnectorAdminEnvVars.
+	ConnectorAdminAccessEnabled bool `gorm:"not null;default:false" json:"connector_admin_access_enabled"`
 	// SecretGrants is a JSON []SecretGrant array naming the shared OpenBao
 	// secret sets (see SharedSecretSet) this instance is granted access to,
 	// beyond its own always-on, always-read-write agent namespace

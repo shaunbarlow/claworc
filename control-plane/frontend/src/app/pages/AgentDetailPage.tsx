@@ -1400,6 +1400,58 @@ export default function AgentDetailPage() {
             />
           )}
 
+          {isAdmin && (settings?.connector_enabled === true || settings?.connector_enabled === "true") && (
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <h3 className="text-sm font-medium text-gray-900 mb-1">OpenConnector access</h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Off by default, independent per agent. Toggling either below mints/revokes this agent's grant immediately and restarts it if the running container's environment needs to change.
+              </p>
+              <div className="space-y-3">
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={instance.connector_mcp_enabled}
+                    disabled={updateMutation.isPending}
+                    onChange={async (e) => {
+                      await updateMutation.mutateAsync({
+                        id: instanceId,
+                        payload: { connector_mcp_enabled: e.target.checked },
+                      });
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Enable OpenConnector MCP access
+                    <span className="block text-xs text-gray-500">
+                      Mints a scoped runtime token for this agent and registers it as an MCP server (mcp.servers.open-connector) so it can call OpenConnector actions as tools.
+                      {instance.has_connector_access ? " Currently minted." : ""}
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={instance.connector_admin_access_enabled}
+                    disabled={updateMutation.isPending}
+                    onChange={async (e) => {
+                      await updateMutation.mutateAsync({
+                        id: instanceId,
+                        payload: { connector_admin_access_enabled: e.target.checked },
+                      });
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Grant OpenConnector admin access
+                    <span className="block text-xs text-gray-500">
+                      Injects the shared connector's own admin token into this agent's environment, so it can make admin-level requests. A much bigger grant than MCP access above, an independent opt-in.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
+
           {/* Webhook (per-instance) — admins and team managers */}
           <WebhookSection instanceId={instanceId} />
 

@@ -77,6 +77,9 @@ export default function AgentForm({
   const { data: settings } = useSettings();
   const { data: allProviders = [] } = useProviders();
   const openbaoAvailable = settings?.openbao_enabled === true || settings?.openbao_enabled === "true";
+  const connectorAvailable = settings?.connector_enabled === true || settings?.connector_enabled === "true";
+  const [connectorMcpEnabled, setConnectorMcpEnabled] = useState(false);
+  const [connectorAdminAccessEnabled, setConnectorAdminAccessEnabled] = useState(false);
   const openbaoSharedSets = settings?.openbao_shared_sets ?? [];
   const { isAdmin } = useAuth();
   const { data: health } = useHealth();
@@ -219,6 +222,19 @@ export default function AgentForm({
     }
     if (secretGrants.length > 0) {
       payload.secret_grants = secretGrants;
+    }
+    // OpenConnector opt-ins: admin only (matches the backend's own gate) and
+    // only meaningful while the managed connector is enabled in Settings.
+    // Omitted (rather than sent as false) so a non-admin's create request
+    // never risks the 403 CreateInstance returns for a non-admin trying to
+    // set either flag.
+    if (isAdmin && connectorAvailable) {
+      if (connectorMcpEnabled) {
+        payload.connector_mcp_enabled = true;
+      }
+      if (connectorAdminAccessEnabled) {
+        payload.connector_admin_access_enabled = true;
+      }
     }
     if (slackEnabled) {
       payload.slack = {
@@ -462,6 +478,51 @@ export default function AgentForm({
           grants={[]}
           onChange={setSecretGrants}
         />
+      )}
+
+      {/* OpenConnector access (admin only; only shown when the managed connector is enabled in Settings). Both opt-ins are off by default -- enabling the connector globally no longer grants every agent access automatically. */}
+      {isAdmin && connectorAvailable && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h3 className="text-sm font-medium text-gray-900 mb-1">OpenConnector access</h3>
+          <p className="text-xs text-gray-500 mb-4">
+            Off by default. Enabling the managed connector in Settings no longer gives every agent
+            access on its own -- opt this agent in explicitly below.
+          </p>
+          <div className="space-y-3">
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={connectorMcpEnabled}
+                onChange={(e) => setConnectorMcpEnabled(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Enable OpenConnector MCP access
+                <span className="block text-xs text-gray-500">
+                  Mints a scoped runtime token for this agent and registers it as an MCP server
+                  (mcp.servers.open-connector) so the agent can call OpenConnector actions as
+                  tools.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={connectorAdminAccessEnabled}
+                onChange={(e) => setConnectorAdminAccessEnabled(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-sm text-gray-700">
+                Grant OpenConnector admin access
+                <span className="block text-xs text-gray-500">
+                  Injects the shared connector's own admin token into this agent's environment, so
+                  it can make admin-level requests (e.g. manage its own runtime token). A much
+                  bigger grant than MCP access above -- independent opt-in.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
       )}
 
       {/* Slack */}
