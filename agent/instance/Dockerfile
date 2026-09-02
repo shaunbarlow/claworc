@@ -138,6 +138,13 @@ RUN mkdir -p /opt/openclaw-skeleton && \
     mv /home/claworc/.openclaw /opt/openclaw-skeleton/.openclaw && \
     chown -R claworc:claworc /opt/openclaw-skeleton && \
     rm -f /tmp/TOOLS.md
+# Root-run openclaw invocations during the build leave a root-owned 0700
+# /root/.openclaw behind. Nothing at runtime should read it -- every openclaw
+# process runs as claworc against /home/claworc/.openclaw -- but if HOME ever
+# leaks through as /root again (see init-openclaw-doctor.sh), an existing
+# root-owned state dir turns that into a hard EACCES instead of a harmless
+# miss. Ship the image without it.
+RUN rm -rf /root/.openclaw
 
 # Reduce SUID surface.
 RUN chmod u-s /usr/bin/su /usr/bin/mount /usr/bin/umount /usr/bin/newgrp \

@@ -22,6 +22,13 @@ import (
 // these names. OpenClaw reads them from the environment for the default Slack
 // account whenever channels.slack.botToken/appToken are unset, so the rendered
 // config block never contains a token.
+//
+// That env fallback only applies while the Slack plugin's channel surface is
+// accepted; an unaccepted plugin loses the channel and OpenClaw then suppresses
+// it as "ambient-only". The agent boot script re-accepts the surface on every
+// boot -- see accept_channel_plugin in
+// agent/instance/rootfs/etc/s6-overlay/s6-rc.d/svc-openclaw/run, which also
+// records why a botToken SecretRef is deliberately not used here.
 const (
 	slackBotTokenEnvVar = "SLACK_BOT_TOKEN"
 	slackAppTokenEnvVar = "SLACK_APP_TOKEN"

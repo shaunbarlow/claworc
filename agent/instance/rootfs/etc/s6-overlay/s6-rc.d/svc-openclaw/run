@@ -74,6 +74,43 @@ if [ -n "$OPENCLAW_INITIAL_PROVIDERS" ]; then
     s6-setuidgid claworc openclaw config set models.providers "$OPENCLAW_INITIAL_PROVIDERS" --replace --json
 fi
 
+# Accept the capability surface of a Claworc-managed channel plugin.
+#
+# Channel plugins ship as npm packages, and OpenClaw records the surface it was
+# granted (channels, tools, hooks, skills) against the installed package's
+# integrity hash. A fresh install or an upgrade leaves that unaccepted, and an
+# unaccepted plugin does not effectively own its channel: the channel loses its
+# config-backed presence signal, falls back to being detected only from ambient
+# env credentials, and gets its auto-start suppressed at boot with
+#
+#   suppressed ambient channel auto-configuration for 2 channels: discord, slack
+#
+# which reads like a credentials problem but is really this. `doctor --fix`
+# refreshes the plugin registry but deliberately does not grant consent on the
+# operator's behalf, so it cannot clear this.
+#
+# Claworc installs and configures these plugins itself, so the consent decision
+# is already made by the operator configuring the channel in Claworc; re-stating
+# it here is what makes the grant survive plugin upgrades. Idempotent and cheap
+# when the surface is already accepted, and best-effort: a failure here should
+# not stop the gateway from booting.
+#
+# Note on the tempting alternative: the boot log points at `--ambient-channels`,
+# and the channel config could instead name the token env vars through OpenClaw
+# SecretRefs ({"source":"env","provider":"default","id":"SLACK_BOT_TOKEN"}),
+# which also clears the ambient classification. Neither is used here.
+# `--ambient-channels` is a blanket opt-out that re-allows every ambient
+# credential for every channel, and a SecretRef that cannot be resolved is
+# startup-fatal ("Startup failed: required secrets are unavailable") -- the
+# config lives on the persisted volume while env vars only arrive on container
+# (re)create, so a config push that lands first would take the whole gateway
+# down instead of just leaving one channel unconfigured. See the same reasoning
+# for the Brave key in control-plane/internal/handlers/search.go.
+accept_channel_plugin() {
+    s6-setuidgid claworc openclaw plugins enable "$1" --accept-capabilities \
+        || echo "svc-openclaw: could not accept capabilities for plugin $1 (continuing)"
+}
+
 # Apply the Claworc-managed Slack channel config. When set it is authoritative
 # for channels.slack, so channels removed in Claworc are dropped by the replace.
 # Tokens are never in this blob — OpenClaw reads SLACK_BOT_TOKEN/SLACK_APP_TOKEN
@@ -81,12 +118,14 @@ fi
 # Claworc), any manually edited channels.slack block is left untouched.
 if [ -n "$OPENCLAW_INITIAL_SLACK" ]; then
     s6-setuidgid claworc openclaw config set channels.slack "$OPENCLAW_INITIAL_SLACK" --replace --json
+    accept_channel_plugin slack
 fi
 
 # Same contract for the Claworc-managed Discord config (token comes from the
 # DISCORD_BOT_TOKEN env var, never from this blob).
 if [ -n "$OPENCLAW_INITIAL_DISCORD" ]; then
     s6-setuidgid claworc openclaw config set channels.discord "$OPENCLAW_INITIAL_DISCORD" --replace --json
+    accept_channel_plugin discord
 fi
 
 echo "Starting OpenClaw Gateway (foreground) as claworc..."

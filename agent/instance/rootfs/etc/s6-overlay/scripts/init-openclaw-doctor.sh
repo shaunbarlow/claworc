@@ -48,6 +48,14 @@ echo "init-openclaw-doctor: running openclaw doctor --fix --non-interactive agai
 # This keeps doctor to state/config repairs only (exactly what we need here)
 # and skips service install/start/restart/bootstrap it has no business doing
 # inside this container.
-s6-setuidgid claworc env OPENCLAW_SERVICE_REPAIR_POLICY=external \
+# HOME=/home/claworc: s6-setuidgid switches uid/gid but leaves HOME alone, and
+# this oneshot runs as root, so without this openclaw resolves its state dir
+# from root's HOME and dies on the image-baked, root-owned /root/.openclaw
+# before running a single check:
+#   EACCES: permission denied, stat '/root/.openclaw/state/openclaw.sqlite-wal'
+# Doctor then never applies the migrations it exists to apply, and the gateway
+# crash-loops on the next legacy-state error it hits. svc-openclaw/run exports
+# the same value for exactly this reason.
+s6-setuidgid claworc env HOME=/home/claworc OPENCLAW_SERVICE_REPAIR_POLICY=external \
     openclaw doctor --fix --non-interactive || \
     echo "init-openclaw-doctor: doctor exited non-zero (continuing; svc-openclaw will report any unresolved migration error)"

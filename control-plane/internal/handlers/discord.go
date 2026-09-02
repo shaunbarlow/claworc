@@ -20,6 +20,11 @@ import (
 // Discord account whenever channels.discord.token is unset, so the rendered
 // config block never contains the token. Discord needs no app-level token —
 // OpenClaw only connects via the Gateway/WebSocket transport.
+//
+// As with Slack, that env fallback holds only while the Discord plugin's
+// channel surface is accepted (see accept_channel_plugin in
+// agent/instance/rootfs/etc/s6-overlay/s6-rc.d/svc-openclaw/run), which is
+// also where the case against a token SecretRef is recorded.
 const discordBotTokenEnvVar = "DISCORD_BOT_TOKEN"
 
 // discordSnowflakeRegex matches raw Discord guild/channel IDs (numeric
