@@ -139,10 +139,16 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 		// openbao user on Kubernetes. No-op on Docker, where ownership is
 		// inherited from the image directory instead — see storagePath.
 		Security: orchestrator.SecurityOptions{FSGroup: &fsGroup},
-		// No Probes.Liveness: OpenBao's own image ships a working
-		// HEALTHCHECK; a generic TCP probe would only add a redundant
-		// failure mode (a sealed-but-listening OpenBao is a normal, healthy
-		// startup state that a naive TCP check would already pass anyway).
+		// No Probes.Liveness, but NOT because the image has its own: it does
+		// not (openbao/openbao:latest declares no HEALTHCHECK -- an earlier
+		// version of this comment claimed otherwise and was wrong). The
+		// reason is that the Docker backend renders Probes.Liveness as
+		// `bash -c '>/dev/tcp/...'`, and this image is Alpine-based with no
+		// bash, so a probe here would fail forever and report the workload
+		// as "error" -- strictly worse than having none. Readiness is
+		// established by Manager.WaitHealthy probing /v1/sys/health instead.
+		// See the health == "" branch of DockerOrchestrator.GetInstanceStatus
+		// for how a healthcheck-less workload is reported.
 	}
 }
 

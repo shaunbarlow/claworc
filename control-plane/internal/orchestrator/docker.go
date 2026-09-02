@@ -796,23 +796,46 @@ func (d *DockerOrchestrator) GetInstanceStatus(ctx context.Context, name string)
 	if inspect.State.Health != nil {
 		health = inspect.State.Health.Status
 	}
+	return mapDockerStatus(status, health), nil
+}
 
+// mapDockerStatus translates a Docker container state plus health status into
+// Claworc's own workload vocabulary ("running"/"creating"/"stopped"/"error").
+// Split out from GetInstanceStatus purely so it can be tested without a
+// Docker daemon; health is "" when the container has no healthcheck at all.
+func mapDockerStatus(status, health string) string {
 	switch status {
 	case "running":
 		switch health {
 		case "healthy":
-			return "running", nil
+			return "running"
 		case "unhealthy":
-			return "error", nil
+			return "error"
+		case "starting":
+			// Healthcheck configured, still inside its start period.
+			return "creating"
 		default:
-			return "creating", nil
+			// health == "": State.Health is nil because the container has no
+			// healthcheck at all -- neither image-native nor from
+			// Probes.Liveness. Docker offers no readiness signal, so the
+			// container being up is the only truth available and "running"
+			// is the honest answer. Reporting "creating" here (as this used
+			// to) is a state that never resolves, since nothing will ever
+			// set a health status: it left the managed OpenBao workload
+			// permanently "creating" in the UI, and permanently ineligible
+			// for env propagation, long after it was serving requests.
+			// Callers needing genuine readiness must probe for themselves,
+			// the way openbaoprov.Manager.WaitHealthy does. Matches the
+			// Kubernetes backend, where a container with no readinessProbe
+			// reports Ready=true as soon as it is running.
+			return "running"
 		}
 	case "created", "restarting":
-		return "creating", nil
+		return "creating"
 	case "exited", "dead", "paused", "removing":
-		return "stopped", nil
+		return "stopped"
 	default:
-		return "stopped", nil
+		return "stopped"
 	}
 }
 
