@@ -4,6 +4,7 @@ ARG S6_OVERLAY_VERSION=3.2.0.2
 ARG TARGETARCH
 ARG USE_CHINA_MIRRORS=false
 ARG OPENCLAW_VERSION=latest
+ARG OPENBAO_VERSION=2.6.2
 
 # Slim agent image: OpenClaw + sshd + cron only. The browser (Chromium /
 # Chrome / Brave) and the VNC stack live in claworc/<browser>-browser images
@@ -55,6 +56,18 @@ RUN S6_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") &&
       | tar -C / -Jxpf - && \
     curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${S6_ARCH}.tar.xz" \
       | tar -C / -Jxpf -
+
+# `bao` CLI (OpenBao), baked into the image so agent scripts/exec-tool calls
+# can hit the per-instance OPENBAO_ADDR/OPENBAO_TOKEN env vars directly
+# (`bao kv get ...`) without an operator installing it themselves. Upstream
+# release asset arch names (amd64/arm64) already match Docker's TARGETARCH,
+# unlike s6-overlay above.
+RUN curl -fsSL "https://github.com/openbao/openbao/releases/download/v${OPENBAO_VERSION}/openbao_${OPENBAO_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      -o /tmp/bao.tar.gz && \
+    tar -C /tmp -xzf /tmp/bao.tar.gz bao && \
+    install -o root -g root -m 0755 /tmp/bao /usr/local/bin/bao && \
+    rm -f /tmp/bao /tmp/bao.tar.gz && \
+    bao version
 
 # Homebrew is installed at build time at its canonical path
 # (/home/linuxbrew/.linuxbrew — bottles hardcode this prefix), then moved to
