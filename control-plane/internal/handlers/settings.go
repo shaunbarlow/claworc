@@ -46,6 +46,7 @@ var plainSettings = []string{
 	"connector_image",
 	"connector_storage",
 	"connector_origin",
+	"connector_allowed_custom_oauth",
 	"openbao_enabled",
 	"openbao_image",
 	"openbao_storage",

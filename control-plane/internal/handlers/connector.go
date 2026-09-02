@@ -23,11 +23,12 @@ import (
 // hang the goroutine forever.
 const connectorApplyTimeout = 5 * time.Minute
 
-// connector_enabled/connector_image/connector_storage/connector_origin are
-// registered as plain settings, and connector_encryption_key/
-// connector_admin_token as fixed-encrypted settings, directly in
-// settings.go's plainSettings / fixedEncryptedSettings so GetSettings/
-// UpdateSettings pick them up through the existing generic paths.
+// connector_enabled/connector_image/connector_storage/connector_origin/
+// connector_allowed_custom_oauth are registered as plain settings, and
+// connector_encryption_key/connector_admin_token as fixed-encrypted
+// settings, directly in settings.go's plainSettings / fixedEncryptedSettings
+// so GetSettings/UpdateSettings pick them up through the existing generic
+// paths.
 
 const defaultConnectorImage = "ghcr.io/shaunbarlow/open-connector:tip"
 const defaultConnectorStorage = "10Gi"
@@ -56,6 +57,7 @@ func resolvedConnectorConfig() (cfg connectorprov.Config, ok bool) {
 	}
 	explicitOrigin, _ := database.GetSetting("connector_origin")
 	origin, _ := resolveConnectorOrigin(explicitOrigin)
+	allowedCustomOAuth, _ := database.GetSetting("connector_allowed_custom_oauth")
 
 	encKeyRaw, _ := database.GetSetting("connector_encryption_key")
 	adminTokenRaw, _ := database.GetSetting("connector_admin_token")
@@ -72,11 +74,12 @@ func resolvedConnectorConfig() (cfg connectorprov.Config, ok bool) {
 	}
 
 	return connectorprov.Config{
-		Image:         image,
-		EncryptionKey: encKey,
-		AdminToken:    adminToken,
-		Origin:        origin,
-		StorageSize:   storage,
+		Image:              image,
+		EncryptionKey:      encKey,
+		AdminToken:         adminToken,
+		Origin:             origin,
+		AllowedCustomOAuth: allowedCustomOAuth,
+		StorageSize:        storage,
 	}, true
 }
 

@@ -8,10 +8,11 @@ import (
 
 func TestBuildSpec_FixedNameAndPort(t *testing.T) {
 	spec := buildSpec(Config{
-		Image:         "ghcr.io/shaunbarlow/open-connector:tip",
-		EncryptionKey: "enc-key",
-		AdminToken:    "admin-token",
-		StorageSize:   "5Gi",
+		Image:              "ghcr.io/shaunbarlow/open-connector:tip",
+		EncryptionKey:      "enc-key",
+		AdminToken:         "admin-token",
+		AllowedCustomOAuth: "*",
+		StorageSize:        "5Gi",
 	})
 
 	if spec.Name != WorkloadName {
@@ -29,6 +30,9 @@ func TestBuildSpec_FixedNameAndPort(t *testing.T) {
 	if spec.Env["OOMOL_CONNECT_ADMIN_TOKEN"] != "admin-token" {
 		t.Errorf("admin token env var missing/wrong: %+v", spec.Env)
 	}
+	if spec.Env["OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH"] != "*" {
+		t.Errorf("allowed custom oauth env var missing/wrong: %+v", spec.Env)
+	}
 	if len(spec.Volumes) != 1 || spec.Volumes[0].Size != "5Gi" || spec.Volumes[0].MountPath != "/app/data" {
 		t.Fatalf("expected one data volume sized 5Gi at /app/data, got %+v", spec.Volumes)
 	}
@@ -41,6 +45,13 @@ func TestBuildSpec_DefaultsStorageWhenEmpty(t *testing.T) {
 	spec := buildSpec(Config{Image: "img"})
 	if len(spec.Volumes) != 1 || spec.Volumes[0].Size != defaultConnectorStorageForTest {
 		t.Fatalf("expected default storage size %q, got %+v", defaultConnectorStorageForTest, spec.Volumes)
+	}
+}
+
+func TestBuildSpec_OmitsAllowedCustomOAuthWhenEmpty(t *testing.T) {
+	spec := buildSpec(Config{Image: "img"})
+	if _, ok := spec.Env["OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH"]; ok {
+		t.Errorf("expected OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH to be omitted when unset, got %+v", spec.Env)
 	}
 }
 

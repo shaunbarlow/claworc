@@ -63,6 +63,14 @@ type Config struct {
 	// http://localhost:<port>, which is fine as long as OAuth flows aren't
 	// used through this deployment.
 	Origin string
+	// AllowedCustomOAuth is the value for OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH:
+	// a comma-separated list of service ids (or "*" for every provider) that
+	// may authorize a connection with its own connection-scoped OAuth app
+	// (clientId/clientSecret passed to POST /oauth/authorize) instead of the
+	// shared per-provider default. Optional; left empty disables the
+	// override entirely, matching OpenConnector's own default. Only takes
+	// effect when EncryptionKey is also set, per OpenConnector's own gate.
+	AllowedCustomOAuth string
 	// StorageSize is the requested capacity for the data volume, e.g. "10Gi".
 	// Honoured only on first creation (matches VolumeMount.Size semantics).
 	StorageSize string
@@ -107,6 +115,9 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 	}
 	if cfg.Origin != "" {
 		env["OOMOL_CONNECT_ORIGIN"] = cfg.Origin
+	}
+	if cfg.AllowedCustomOAuth != "" {
+		env["OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH"] = cfg.AllowedCustomOAuth
 	}
 
 	storage := cfg.StorageSize
