@@ -22,9 +22,20 @@ func (openAICompletions) SetAuthHeader(req *http.Request, mat AuthMaterial) {
 	req.Header.Set("Authorization", "Bearer "+mat.APIKey)
 }
 
+// RewritePath reconciles the version segment between the provider base URL and
+// the incoming request path. OpenClaw's openai-completions client appends
+// endpoints straight onto the configured baseUrl (its convention is that the
+// baseUrl already carries the version, e.g. https://api.moonshot.ai/v1), and
+// Claworc hands it a versionless gateway URL — so the path arrives here as
+// /chat/completions. A versionless provider base URL therefore needs /v1
+// injected, or the request lands on api.openai.com/chat/completions and gets
+// an empty-bodied 404 that looks like an unknown model.
 func (openAICompletions) RewritePath(baseURL, requestPath string) string {
 	if pathEndsWithVersion(baseURL) && strings.HasPrefix(requestPath, "/v1/") {
 		return requestPath[3:]
+	}
+	if !pathEndsWithVersion(baseURL) && !strings.HasPrefix(requestPath, "/v1/") {
+		return "/v1" + requestPath
 	}
 	return requestPath
 }
@@ -53,15 +64,8 @@ type openAIResponses struct {
 	openAICompletions
 }
 
-func (openAIResponses) RewritePath(baseURL, requestPath string) string {
-	if pathEndsWithVersion(baseURL) && strings.HasPrefix(requestPath, "/v1/") {
-		return requestPath[3:]
-	}
-	if !pathEndsWithVersion(baseURL) && !strings.HasPrefix(requestPath, "/v1/") {
-		return "/v1" + requestPath
-	}
-	return requestPath
-}
+// RewritePath is inherited from the embedded openAICompletions — both types
+// need identical /v1 reconciliation against the provider base URL.
 
 func (openAIResponses) ParseUsage(body []byte) (int, int, int) {
 	return ParseUsageOpenAIResponses(body)
