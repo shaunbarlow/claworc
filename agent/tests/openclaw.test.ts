@@ -105,6 +105,13 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     // (uses `plugins.entries.*`) — so a single snapshot can't track both.
     // The stable parts of the config (gateway, browser, agents, meta, ...)
     // are what our integration actually cares about.
+    //
+    // `agents.entries.main` is absent from the image-baked skeleton and gets
+    // written by the init-openclaw-doctor boot oneshot (doctor's agent
+    // identity migration). It is therefore also a canary: if it disappears
+    // from this snapshot, boot-time doctor stopped running rather than the
+    // config shape changing -- which is exactly the silent failure the
+    // HOME=/home/claworc fix in init-openclaw-doctor.sh exists to prevent.
     delete config.skills;
     delete config.plugins;
     delete config.hooks;

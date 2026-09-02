@@ -2,6 +2,11 @@
 
 exports[`agent image > openclaw.json structure matches snapshot 1`] = `
 {
+  "agents": {
+    "entries": {
+      "main": {},
+    },
+  },
   "browser": {
     "attachOnly": "boolean",
     "defaultProfile": "string",
