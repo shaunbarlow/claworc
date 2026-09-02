@@ -1950,6 +1950,11 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			log.Printf("Failed to update resources for instance %d: %v", inst.ID, err)
 		}
+		// On Kubernetes this mutates .spec.template, so the Deployment
+		// controller replaces the pod and the SSH host key changes with it.
+		// Docker updates resources in place, where this is a harmless re-pin
+		// of the same key on the next handshake.
+		clearInstanceHostKey(inst.ID, "resource update")
 	}
 
 	// Apply placement changes to running deployment. Any field here (pod
@@ -1980,6 +1985,10 @@ func UpdateInstance(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			log.Printf("Failed to update placement config for instance %d: %v", inst.ID, err)
 		}
+		// The recreated pod comes up with a new SSH host key, so the pin has to
+		// go with the torn-down connection above -- otherwise the WaitForSSH
+		// below reconnects into a host key mismatch instead of the new pod.
+		clearInstanceHostKey(inst.ID, "placement update")
 	}
 
 	if orch != nil && orchStatus == "running" {
@@ -2140,6 +2149,11 @@ func UpdateInstanceImage(w http.ResponseWriter, r *http.Request) {
 			// OPENCLAW_INITIAL_SLACK/DISCORD vars on every image update.
 			params := buildCreateParams(inst)
 			err := orch.UpdateImage(ctx, instName, params)
+			// UpdateImage replaces the container, giving it a fresh SSH host
+			// key. Clear the pin unconditionally: on the failure path the pod
+			// may still have been replaced (the branch below explicitly handles
+			// it still running), and a stale pin would block every reconnect.
+			clearInstanceHostKey(instID, "image update")
 			if err != nil {
 				log.Printf("Failed to update image for instance %d: %v", instID, err)
 				finalStatus := "error"
@@ -2348,6 +2362,7 @@ func RestartInstance(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to restart instance: %v", err))
 			return
 		}
+		clearInstanceHostKey(inst.ID, "restart")
 	}
 
 	database.DB.Model(&inst).Updates(map[string]interface{}{

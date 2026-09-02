@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -19,6 +20,33 @@ import (
 
 // SSHMgr is set from main.go during init.
 var SSHMgr *sshproxy.SSHManager
+
+// clearInstanceHostKey drops the pinned SSH host key for an instance after
+// claworc has itself replaced the container.
+//
+// sshproxy pins the host key Trust-On-First-Use and deliberately keeps that pin
+// across a disconnect, so an unexplained key change is still rejected as a
+// possible MITM -- see TestSecurity_TOFURejectsChangedHostKey, which asserts a
+// mismatch is refused even after Close(). The consequence is that a legitimate
+// recreate (image update, restart, or a Kubernetes rolling update from a
+// resource change) leaves a stale pin that rejects every later handshake:
+// tunnels never come back, the rate limiter blocks the instance, and the only
+// recovery is restarting the control plane. SSHManager.Connect does clear the
+// pin when reconnecting, but only when an m.conns entry still exists, and a
+// restart always disconnects first -- removing that entry -- so the clear never
+// fires for exactly the case it was written for.
+//
+// Calling this from the operations that replace a container is the deliberate
+// "a legitimate restart happened" acknowledgement: we know the host key changed
+// because we are the ones who changed it. Unexplained changes still get
+// rejected.
+func clearInstanceHostKey(instID uint, reason string) {
+	if SSHMgr == nil {
+		return
+	}
+	SSHMgr.ClearHostKey(instID)
+	log.Printf("[ssh] Cleared pinned host key for instance %d (%s)", instID, reason)
+}
 
 // TunnelMgr is set from main.go during init.
 var TunnelMgr *sshproxy.TunnelManager
