@@ -386,6 +386,7 @@ func buildDeploymentFromSpec(ns string, spec WorkloadSpec) *appsv1.Deployment {
 		Name:            "main",
 		Image:           spec.Image,
 		Command:         spec.Command,
+		Args:            spec.Args,
 		ImagePullPolicy: pullPolicy,
 		SecurityContext: secCtx,
 		Env:             envVars,

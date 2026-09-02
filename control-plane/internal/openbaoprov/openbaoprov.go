@@ -90,12 +90,19 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 	return orchestrator.WorkloadSpec{
 		Name:  WorkloadName,
 		Image: cfg.Image,
+		Args:  []string{"server"},
 		Env: map[string]string{
 			"BAO_LOCAL_CONFIG": localConfig,
 		},
-		// The image's own entrypoint runs `bao server` by default when no
-		// command is given and BAO_LOCAL_CONFIG (or a mounted config file) is
-		// present; no explicit Command override needed.
+		// Args must pin the subcommand to a bare `server`. The image's
+		// default CMD is `server -dev -dev-no-store-token`, and inheriting it
+		// is fatal: the entrypoint always appends -dev-listen-address, so
+		// dev mode binds 0.0.0.0:8200 itself and then the listener from
+		// BAO_LOCAL_CONFIG fails with "address already in use", crash-looping
+		// the container. Dev mode would also force inmem storage, silently
+		// discarding the persistent volume below. Args (not Command) so the
+		// image's docker-entrypoint.sh still runs -- it is what materialises
+		// BAO_LOCAL_CONFIG into /openbao/config/local.json and drops root.
 		Labels: map[string]string{
 			"claworc-role": "openbao",
 		},

@@ -251,7 +251,8 @@ func (d *DockerOrchestrator) buildContainerConfig(spec WorkloadSpec) (*container
 	cc := &container.Config{
 		Image:        spec.Image,
 		Hostname:     spec.Hostname,
-		Cmd:          spec.Command,
+		Entrypoint:   spec.Command,
+		Cmd:          spec.Args,
 		Env:          env,
 		Labels:       mergeLabels(spec.Labels, map[string]string{"managed-by": labelManagedBy, "instance": spec.Name}),
 		ExposedPorts: exposed,

@@ -17,8 +17,21 @@ type WorkloadSpec struct {
 	// Deployment / Service / NetworkPolicy name and the `app=` label.
 	Name string
 
-	Image     string
-	Command   []string
+	Image string
+
+	// Command overrides the image's entrypoint (Docker ENTRYPOINT / K8s
+	// container.command). Leave empty to keep the image's own entrypoint,
+	// which is usually what you want for third-party images that ship a
+	// wrapper script.
+	Command []string
+
+	// Args overrides the image's default arguments (Docker CMD / K8s
+	// container.args) while keeping its entrypoint. Use this to select a
+	// subcommand on an image whose entrypoint is a wrapper script — e.g.
+	// Args: []string{"server"} on openbao/openbao, whose default CMD adds
+	// `-dev` flags that must not be inherited.
+	Args []string
+
 	Env       map[string]string
 	Resources ResourceParams
 
