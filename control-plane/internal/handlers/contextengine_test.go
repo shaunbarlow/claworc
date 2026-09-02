@@ -175,6 +175,38 @@ func TestApplyContextEngineConfigHotReloadsWhenAlreadyInstalled(t *testing.T) {
 	}
 }
 
+// Selecting the engine has to grant it conversation access. OpenClaw denies
+// that to every non-bundled plugin by default, and without the grant
+// lossless-claw loads but its before_prompt_build hook is refused, so the
+// engine is silently inert -- enabled everywhere in Claworc's UI and doing
+// nothing on the agent.
+func TestApplyContextEngineConfigGrantsConversationAccess(t *testing.T) {
+	setupHandlersTestDB(t)
+	inst := &database.Instance{Name: "bot-x", ContextEngine: "lossless-claw"}
+
+	agent := &mockInstance{results: []callResult{
+		{stdout: `{"plugins":[{"id":"lossless-claw"}]}`},
+	}}
+	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
+
+	argv, ok := findCall(agent.calls, "config", "set", "plugins.entries.lossless-claw.hooks.allowConversationAccess")
+	if !ok {
+		t.Fatalf("conversation access was never granted; calls: %v", agent.calls)
+	}
+	if argv[3] != "true" {
+		t.Errorf("allowConversationAccess = %q, want \"true\"", argv[3])
+	}
+	if !hasArg(argv, "--json") {
+		t.Errorf("boolean set needs --json or OpenClaw stores the string \"true\": %v", argv)
+	}
+
+	// The sibling hooks keys are the operator's, so the grant must be written
+	// as a leaf rather than replacing the whole hooks subtree.
+	if argv, ok := findCall(agent.calls, "config", "set", "plugins.entries.lossless-claw.hooks"); ok {
+		t.Errorf("wrote the whole hooks subtree, clobbering operator settings: %v", argv)
+	}
+}
+
 // A fresh install does force a restart, since the agent process needs to
 // discover the newly installed plugin.
 func TestApplyContextEngineConfigInstallsAndRestartsWhenMissing(t *testing.T) {
@@ -232,6 +264,7 @@ func TestApplyContextEngineConfigTeardownClearsOwnedPaths(t *testing.T) {
 		"plugins.slots.contextEngine",
 		"plugins.entries.lossless-claw.enabled",
 		"plugins.entries.lossless-claw.llm",
+		"plugins.entries.lossless-claw.hooks.allowConversationAccess",
 	} {
 		argv, ok := findCall(agent.calls, "config", "unset", path)
 		if !ok {

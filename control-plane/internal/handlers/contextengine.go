@@ -404,6 +404,10 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 		for pluginID := range contextEnginePluginSpecs {
 			contextEngineConfigUnset(ctx, agent, name, "plugins.entries."+pluginID+".enabled")
 			contextEngineConfigUnset(ctx, agent, name, "plugins.entries."+pluginID+".llm")
+			// Withdraw the conversation-access grant with the engine that
+			// needed it. Only this leaf, so an operator's own hooks settings
+			// (timeouts, allowPromptInjection) survive the switch back.
+			contextEngineConfigUnset(ctx, agent, name, "plugins.entries."+pluginID+".hooks.allowConversationAccess")
 		}
 		return
 	}
@@ -425,6 +429,21 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 	}
 	contextEngineConfigSet(ctx, agent, name, engine+" plugin enabled",
 		"plugins.entries."+engine+".enabled", "true", "--json")
+
+	// A context engine is useless without conversation access, and OpenClaw
+	// denies it by default to every plugin that is not bundled with OpenClaw
+	// itself. Enabling the engine without this leaves it loaded but inert, and
+	// the only symptom is one line in the gateway log:
+	//
+	//   typed hook "before_prompt_build" blocked because non-bundled plugins
+	//   must set plugins.entries.lossless-claw.hooks.allowConversationAccess=true
+	//
+	// so selecting the engine in Claworc has to carry the grant with it.
+	// Written as a single leaf, not a `hooks` subtree replace: the rest of that
+	// subtree (allowPromptInjection, timeoutMs, timeouts) is the operator's to
+	// set by hand, and a --replace here would silently drop it.
+	contextEngineConfigSet(ctx, agent, name, engine+" conversation access",
+		"plugins.entries."+engine+".hooks.allowConversationAccess", "true", "--json")
 
 	if policy, ok := buildContextEngineLLMPolicy(s); ok {
 		policyJSON, err := json.Marshal(policy)
