@@ -188,8 +188,24 @@ func ensureOpenbaoInitialized(ctx context.Context, mgr *openbaoprov.Manager) err
 
 	adminTokenRaw, _ := database.GetSetting("openbao_admin_token")
 	if adminTokenRaw != "" {
-		// Already bootstrapped past this point on a previous run; nothing
-		// left to do except make sure the KV mount exists (cheap, idempotent).
+		// Already bootstrapped past this point on a previous run. Re-push the
+		// admin policy before using the token: OpenBao resolves a token's
+		// policies by name on every request, so rewriting the policy under
+		// the same name upgrades the capabilities of the already-minted
+		// token in place, with no re-mint and no change to what is stored in
+		// settings. Without this, a deployment that bootstrapped against an
+		// older openbaoAdminPolicyDocument would keep its stale capabilities
+		// forever, since the mint path below never runs again -- which is
+		// exactly how the missing bare "sys/mounts" grant survived a
+		// redeploy.
+		rootToken, err := utils.Decrypt(rootTokenRaw)
+		if err != nil || rootToken == "" {
+			return fmt.Errorf("decrypt root token: %w", err)
+		}
+		root := openbaoprov.NewAdminClient(host, port, rootToken)
+		if err := root.PutPolicy(ctx, openbaoAdminPolicyName, openbaoAdminPolicyDocument); err != nil {
+			return fmt.Errorf("refresh admin policy: %w", err)
+		}
 		adminToken, err := utils.Decrypt(adminTokenRaw)
 		if err != nil || adminToken == "" {
 			return fmt.Errorf("decrypt admin token: %w", err)
@@ -243,6 +259,13 @@ path "sys/policies/acl/*" {
 }
 path "sys/mounts/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
+}
+# The bare path as well as the glob: EnsureKVv2Mount lists mounts with
+# GET /v1/sys/mounts, and an OpenBao path with a trailing /* matches only
+# what follows the literal "sys/mounts/" prefix -- never "sys/mounts"
+# itself, which would otherwise be denied.
+path "sys/mounts" {
+  capabilities = ["read", "list"]
 }
 `
 
