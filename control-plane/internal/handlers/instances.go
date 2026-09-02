@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -276,6 +277,7 @@ func computeEffectiveModels(mc modelsConfig) []string {
 type GatewayProvider struct {
 	Key        string
 	APIType    string
+	BaseURL    string // upstream provider base URL, used to gate host-specific api overrides
 	Models     []database.ProviderModel
 	CatalogKey string // non-empty for catalog-backed providers (e.g. "openai", "anthropic")
 }
@@ -286,6 +288,51 @@ type openclawProviderCfg struct {
 	API     string                   `json:"api"`
 	APIKey  string                   `json:"apiKey"`
 	Models  []database.ProviderModel `json:"models"`
+}
+
+// isNativeOpenAIHost reports whether baseURL points at OpenAI's own API host.
+// Third-party OpenAI-compatible endpoints (Moonshot, vLLM, LM Studio, LiteLLM
+// proxies) commonly implement /v1/chat/completions but not /v1/responses, so
+// endpoint overrides that assume OpenAI's native surface must not leak to them.
+func isNativeOpenAIHost(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "api.openai.com")
+}
+
+// modelDeclaredAPI returns the api adapter OpenClaw should use for one specific
+// model, or "" to inherit the provider-level api.
+//
+// OpenAI's native API rejects function tools sent alongside reasoning_effort on
+// /v1/chat/completions. Verified against every gpt-5.x reasoning model in the
+// catalog, each returning the same error:
+//
+//	Function tools with reasoning_effort are not supported for <model> in
+//	/v1/chat/completions. To use function tools, use /v1/responses or set
+//	reasoning_effort to 'none'.
+//
+// OpenClaw sends reasoning_effort for any model declared reasoning:true, so a
+// provider-wide openai-completions api leaves those models unable to call tools
+// at all — and tools are most of what an agent does. Declaring openai-responses
+// per model routes exactly those models to /v1/responses while non-reasoning
+// entries on the same provider (embeddings, for instance) keep the completions
+// endpoint they need.
+//
+// An explicit per-model api stored on the provider always wins, so an operator
+// can override this inference in either direction.
+func modelDeclaredAPI(gp GatewayProvider, providerAPI string, m database.ProviderModel) string {
+	if m.API != "" {
+		return m.API
+	}
+	if providerAPI != "openai-completions" || !m.Reasoning {
+		return ""
+	}
+	if gp.CatalogKey != "openai" || !isNativeOpenAIHost(gp.BaseURL) {
+		return ""
+	}
+	return "openai-responses"
 }
 
 // buildOpenClawProvidersJSON builds the models.providers JSON for OpenClaw config.
@@ -337,6 +384,14 @@ func buildOpenClawProvidersJSON(models []string, gatewayProviders map[string]Gat
 		if gpModels == nil {
 			gpModels = []database.ProviderModel{}
 		}
+		// Resolve the per-model api adapter on a copy: gpModels may alias the
+		// caller's GatewayProvider.Models or a cached catalog slice, and this
+		// declaration must not mutate either.
+		declaredModels := make([]database.ProviderModel, len(gpModels))
+		copy(declaredModels, gpModels)
+		for i := range declaredModels {
+			declaredModels[i].API = modelDeclaredAPI(gp, apiType, declaredModels[i])
+		}
 		// Codex declares openai-responses to OpenClaw so pi-ai skips its
 		// client-side JWT decode of apiKey. The gateway translates path/auth/SSE
 		// upstream. The DB record keeps the codex apiType for gateway routing.
@@ -348,7 +403,7 @@ func buildOpenClawProvidersJSON(models []string, gatewayProviders map[string]Gat
 			BaseURL: fmt.Sprintf("http://127.0.0.1:%d", gatewayPort),
 			API:     declaredAPI,
 			APIKey:  gp.Key,
-			Models:  gpModels,
+			Models:  declaredModels,
 		}
 	}
 
@@ -389,6 +444,7 @@ func resolveGatewayProviders(inst database.Instance) map[string]GatewayProvider 
 		result[p.Key] = GatewayProvider{
 			Key:        gk,
 			APIType:    p.APIType,
+			BaseURL:    p.BaseURL,
 			Models:     database.ParseProviderModels(p.Models),
 			CatalogKey: p.Provider,
 		}

@@ -269,8 +269,14 @@ type BrowserSession struct {
 
 // ProviderModel represents a model entry in the OpenClaw provider config.
 type ProviderModel struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// API overrides the provider-level api adapter for this one model, matching
+	// OpenClaw's ModelDefinitionConfig.api ("Optional API adapter override for
+	// this model"). Empty means inherit the provider's api. Needed because
+	// OpenAI's native endpoint refuses function tools alongside reasoning_effort
+	// on /v1/chat/completions and requires /v1/responses for reasoning models.
+	API           string             `json:"api,omitempty"`
 	Reasoning     bool               `json:"reasoning,omitempty"`
 	Input         []string           `json:"input,omitempty"`
 	ContextWindow *int               `json:"contextWindow,omitempty"`

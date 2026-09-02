@@ -75,6 +75,37 @@ func (openAIResponses) ParseStreamingUsage(body []byte) (int, int, int) {
 	return ParseUsageOpenAIResponsesStream(body)
 }
 
+// usageAPITypeForPath returns the APIType whose usage payload shape matches the
+// endpoint actually being called, which is not always the provider's declared
+// api type. An individual model may override its api adapter (see
+// ModelDefinitionConfig.api), so a provider declared openai-completions can
+// legitimately receive /responses traffic for its reasoning models.
+//
+// The two payloads report usage under disjoint keys — completions uses
+// prompt_tokens/completion_tokens, responses uses input_tokens/output_tokens —
+// so parsing one with the other's parser silently records 0 tokens and $0.00
+// cost for every such request. Only the OpenAI completions/responses pair is
+// reconciled here; codex, anthropic, google, ollama and bedrock keep the
+// api type they were resolved with.
+func usageAPITypeForPath(apiType string, at APIType, requestPath string) APIType {
+	if apiType != "openai-completions" && apiType != "openai-responses" {
+		return at
+	}
+	switch {
+	case strings.HasSuffix(requestPath, "/responses"):
+		return openAIResponses{}
+	case strings.HasSuffix(requestPath, "/chat/completions"):
+		return openAICompletions{}
+	case strings.HasSuffix(requestPath, "/embeddings"):
+		// Embeddings report usage completions-style (prompt_tokens/total_tokens)
+		// and have no responses-API equivalent. They ride whichever provider the
+		// agent's embedding model resolves to — often one declared for chat — so
+		// pin them to the completions parser regardless of that declaration.
+		return openAICompletions{}
+	}
+	return at
+}
+
 // --- openAICodexResponses (ChatGPT subscription endpoint) ---
 //
 // Used when an LLMProvider authenticates via OAuth against ChatGPT's

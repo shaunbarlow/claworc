@@ -334,7 +334,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	inputTokens, outputTokens, cachedInputTokens, costUSD, errMsg := processResponse(w, resp.Body, isStreaming, at, apiType, resp.StatusCode, providerModels, reqBody.Model)
+	// Usage is parsed against the endpoint actually called, not the provider's
+	// declared api type — a single model may override its api adapter, and the
+	// completions/responses payloads report usage under disjoint keys.
+	usageAT := usageAPITypeForPath(apiType, at, r.URL.Path)
+	inputTokens, outputTokens, cachedInputTokens, costUSD, errMsg := processResponse(w, resp.Body, isStreaming, usageAT, apiType, resp.StatusCode, providerModels, reqBody.Model)
 	latencyMs := time.Since(start).Milliseconds()
 	logRequest(instanceID, providerID, reqBody.Model, inputTokens, outputTokens, cachedInputTokens, costUSD, resp.StatusCode, latencyMs, errMsg)
 	logLine(instanceID, providerKey, reqBody.Model, r.URL.Path, resp.StatusCode, latencyMs, inputTokens, outputTokens, cachedInputTokens, costUSD, errMsg)

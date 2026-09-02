@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -545,5 +546,163 @@ func TestConfigureInstance_NewProviderDoesNotEmptyConfig(t *testing.T) {
 	// The brand-new provider falls back to its catalog instead of nothing.
 	if !strings.Contains(providersJSON, "gpt-5") {
 		t.Errorf("newly added provider should declare its catalog; got: %s", providersJSON)
+	}
+}
+
+// --- per-model api adapter override (buildOpenClawProvidersJSON) ---
+
+// decodeProviders unmarshals the models.providers JSON the builder emits.
+func decodeProviders(t *testing.T, raw string) map[string]struct {
+	API    string                   `json:"api"`
+	Models []database.ProviderModel `json:"models"`
+} {
+	t.Helper()
+	var got map[string]struct {
+		API    string                   `json:"api"`
+		Models []database.ProviderModel `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("unmarshal providers JSON: %v", err)
+	}
+	return got
+}
+
+// modelByID finds a declared model entry by id.
+func modelByID(models []database.ProviderModel, id string) *database.ProviderModel {
+	for i := range models {
+		if models[i].ID == id {
+			return &models[i]
+		}
+	}
+	return nil
+}
+
+func TestBuildOpenClawProvidersJSON_PerModelAPIOverride(t *testing.T) {
+	// OpenAI's native endpoint refuses function tools alongside reasoning_effort
+	// on /v1/chat/completions, so reasoning models must be declared
+	// openai-responses while non-reasoning models keep completions.
+	providers := map[string]GatewayProvider{
+		"openai": {
+			Key:        "vk-test",
+			APIType:    "openai-completions",
+			BaseURL:    "https://api.openai.com/",
+			CatalogKey: "openai",
+			Models: []database.ProviderModel{
+				{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", Reasoning: true},
+				{ID: "text-embedding-3-small", Name: "Embed Small"},
+			},
+		},
+	}
+	raw, err := buildOpenClawProvidersJSON(
+		[]string{"openai/gpt-5.6-luna", "openai/text-embedding-3-small"}, providers, 40001)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	got := decodeProviders(t, raw)
+
+	if got["openai"].API != "openai-completions" {
+		t.Errorf("provider-level api should stay openai-completions, got %q", got["openai"].API)
+	}
+	if m := modelByID(got["openai"].Models, "gpt-5.6-luna"); m == nil {
+		t.Fatal("gpt-5.6-luna missing from declaration")
+	} else if m.API != "openai-responses" {
+		t.Errorf("reasoning model should declare openai-responses, got %q", m.API)
+	}
+	if m := modelByID(got["openai"].Models, "text-embedding-3-small"); m == nil {
+		t.Fatal("embedding model missing from declaration")
+	} else if m.API != "" {
+		t.Errorf("non-reasoning model should inherit provider api, got %q", m.API)
+	}
+}
+
+func TestBuildOpenClawProvidersJSON_NoOverrideForThirdPartyEndpoint(t *testing.T) {
+	// Third-party OpenAI-compatible endpoints commonly lack /v1/responses;
+	// declaring it there would break them.
+	cases := []struct {
+		name       string
+		baseURL    string
+		catalogKey string
+	}{
+		{"non-openai catalog provider", "https://api.moonshot.ai/v1", "moonshot"},
+		{"openai catalog key but proxied base URL", "https://litellm.internal/v1", "openai"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			providers := map[string]GatewayProvider{
+				"p": {
+					Key: "vk-test", APIType: "openai-completions",
+					BaseURL: tc.baseURL, CatalogKey: tc.catalogKey,
+					Models: []database.ProviderModel{{ID: "m1", Name: "M1", Reasoning: true}},
+				},
+			}
+			raw, err := buildOpenClawProvidersJSON([]string{"p/m1"}, providers, 40001)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if m := modelByID(decodeProviders(t, raw)["p"].Models, "m1"); m == nil {
+				t.Fatal("m1 missing")
+			} else if m.API != "" {
+				t.Errorf("should not override api for %s, got %q", tc.baseURL, m.API)
+			}
+		})
+	}
+}
+
+func TestBuildOpenClawProvidersJSON_ExplicitModelAPIWins(t *testing.T) {
+	// An operator-set per-model api must survive inference, in both directions.
+	providers := map[string]GatewayProvider{
+		"openai": {
+			Key: "vk-test", APIType: "openai-completions",
+			BaseURL: "https://api.openai.com/", CatalogKey: "openai",
+			Models: []database.ProviderModel{
+				{ID: "pinned", Name: "Pinned", Reasoning: true, API: "openai-completions"},
+			},
+		},
+	}
+	raw, err := buildOpenClawProvidersJSON([]string{"openai/pinned"}, providers, 40001)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if m := modelByID(decodeProviders(t, raw)["openai"].Models, "pinned"); m == nil {
+		t.Fatal("pinned missing")
+	} else if m.API != "openai-completions" {
+		t.Errorf("explicit per-model api should win, got %q", m.API)
+	}
+}
+
+func TestBuildOpenClawProvidersJSON_AnthropicUnaffected(t *testing.T) {
+	providers := map[string]GatewayProvider{
+		"anthropic": {
+			Key: "vk-test", APIType: "anthropic-messages",
+			BaseURL: "https://api.anthropic.com/", CatalogKey: "anthropic",
+			Models: []database.ProviderModel{{ID: "claude-sonnet-5", Name: "Sonnet 5", Reasoning: true}},
+		},
+	}
+	raw, err := buildOpenClawProvidersJSON([]string{"anthropic/claude-sonnet-5"}, providers, 40001)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if m := modelByID(decodeProviders(t, raw)["anthropic"].Models, "claude-sonnet-5"); m == nil {
+		t.Fatal("model missing")
+	} else if m.API != "" {
+		t.Errorf("anthropic models should not get an api override, got %q", m.API)
+	}
+}
+
+func TestBuildOpenClawProvidersJSON_DoesNotMutateCallerModels(t *testing.T) {
+	// The declaration is built on a copy; the caller's GatewayProvider.Models
+	// (and any cached catalog slice behind it) must be left untouched.
+	models := []database.ProviderModel{{ID: "gpt-5.6-luna", Name: "Luna", Reasoning: true}}
+	providers := map[string]GatewayProvider{
+		"openai": {
+			Key: "vk-test", APIType: "openai-completions",
+			BaseURL: "https://api.openai.com/", CatalogKey: "openai", Models: models,
+		},
+	}
+	if _, err := buildOpenClawProvidersJSON([]string{"openai/gpt-5.6-luna"}, providers, 40001); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if models[0].API != "" {
+		t.Errorf("caller's model slice was mutated: API=%q", models[0].API)
 	}
 }
