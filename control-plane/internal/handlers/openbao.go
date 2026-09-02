@@ -267,6 +267,14 @@ path "sys/mounts/*" {
 path "sys/mounts" {
   capabilities = ["read", "list"]
 }
+# Minting each agent's own long-lived token (ensureInstanceOpenbaoToken ->
+# CreateOrphanToken). create-orphan is a sudo-protected endpoint, so "sudo"
+# is required on top of the write capabilities: without it the mint is
+# refused outright (403 with "create" alone, 400 with "create"+"update"),
+# leaving every agent tokenless.
+path "auth/token/create-orphan" {
+  capabilities = ["create", "update", "sudo"]
+}
 `
 
 // resolvedOpenbaoAdminClient returns an AdminClient authenticated with
