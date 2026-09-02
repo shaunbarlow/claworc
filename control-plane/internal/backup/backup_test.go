@@ -99,6 +99,18 @@ func setupTestDB(t *testing.T) {
 		t.Fatalf("open test db: %v", err)
 	}
 	database.DB.AutoMigrate(&database.Instance{}, &database.Setting{}, &database.Backup{}, &database.BackupSchedule{})
+	// Pin the pool to one connection. cache=shared uses table-level locking and
+	// returns SQLITE_LOCKED ("database table is locked: backups") rather than
+	// SQLITE_BUSY, and SQLite does not invoke the busy handler for shared-cache
+	// table conflicts -- so a busy_timeout cannot retry them. With more than one
+	// pooled connection, a backup goroutine's write to `backups` races the test's
+	// polling read of the same table and fails outright, which finishBackup then
+	// records as status "failed". Serializing on a single connection removes the
+	// cross-connection contention entirely. Same reason as the SetMaxOpenConns(1)
+	// in handlers/instances_clone_test.go and sshgateway/auth_test.go.
+	if sqlDB, err := database.DB.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+	}
 }
 
 func setupTestDataPath(t *testing.T) string {
