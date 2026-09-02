@@ -425,6 +425,9 @@ func buildDeploymentFromSpec(ns string, spec WorkloadSpec) *appsv1.Deployment {
 		// relabels the shared volume, breaking the agent pod with EACCES.
 		SecurityContext: &corev1.PodSecurityContext{
 			SELinuxOptions: &corev1.SELinuxOptions{Level: seLinuxMCSLevel},
+			// Set only when the spec asks for it, so workloads that run as
+			// root keep the cluster default.
+			FSGroup: spec.Security.FSGroup,
 		},
 		ImagePullSecrets: []corev1.LocalObjectReference{{Name: "ghcr-secret"}},
 	}

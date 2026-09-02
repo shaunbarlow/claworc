@@ -143,6 +143,13 @@ type SecurityOptions struct {
 	AddCapabilities          []string
 	// SeccompDefault selects the runtime's default seccomp profile.
 	SeccompDefault bool
+
+	// FSGroup, when set, becomes the pod's supplemental group and makes
+	// mounted volumes group-owned by it (K8s only; Docker inherits volume
+	// ownership from the image directory instead). Needed by images that run
+	// as a non-root user and must write to a PVC, which is otherwise
+	// root-owned and unchownable by the unprivileged process.
+	FSGroup *int64
 }
 
 // ResourceParams carries CPU and memory requests / limits in K8s string form

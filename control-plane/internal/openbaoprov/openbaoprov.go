@@ -42,6 +42,24 @@ const dataVolumeName = "claworc-openbao-data"
 // pins OpenConnector's port 3000 — one fewer moving part.
 const containerPort = 8200
 
+// storagePath is where the file storage backend lives, and must stay
+// /openbao/file: the image runs as USER openbao (uid 100), so the server
+// process never holds root and cannot chown its own storage directory. The
+// image pre-creates (and declares as a VOLUME) exactly /openbao/file and
+// /openbao/logs, owned by openbao, which is what makes a volume mounted
+// there writable — Docker seeds a fresh named volume with the image
+// directory's ownership. Any other path (this was /openbao/data) does not
+// exist in the image, so the volume is created root-owned and init dies with
+// "failed to persist keyring: mkdir /openbao/file/core: permission denied".
+// On Kubernetes the equivalent guarantee comes from FSGroup below, since a
+// PVC ignores the image directory's ownership.
+const storagePath = "/openbao/file"
+
+// openbaoGID is the group the image's openbao user belongs to. Used as the
+// pod FSGroup on Kubernetes so the mounted PVC is group-writable by the
+// non-root server process.
+const openbaoGID int64 = 1000
+
 // healthTimeout bounds a single /v1/sys/health probe request.
 const healthTimeout = 5 * time.Second
 
@@ -79,13 +97,14 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 	if storage == "" {
 		storage = "1Gi"
 	}
+	fsGroup := openbaoGID
 
 	localConfig := fmt.Sprintf(`{
-  "storage": {"file": {"path": "/openbao/data"}},
+  "storage": {"file": {"path": "%s"}},
   "listener": {"tcp": {"address": "0.0.0.0:%d", "tls_disable": true}},
   "disable_mlock": true,
   "api_addr": "http://%s:%d"
-}`, containerPort, WorkloadName, containerPort)
+}`, storagePath, containerPort, WorkloadName, containerPort)
 
 	return orchestrator.WorkloadSpec{
 		Name:  WorkloadName,
@@ -111,11 +130,15 @@ func buildSpec(cfg Config) orchestrator.WorkloadSpec {
 		// deliberately by an admin editing openbao_image, not force-pulled on
 		// every apply. Matches ordinary instance image semantics.
 		Volumes: []orchestrator.VolumeMount{
-			{Name: dataVolumeName, Size: storage, MountPath: "/openbao/data"},
+			{Name: dataVolumeName, Size: storage, MountPath: storagePath},
 		},
 		Ports: []orchestrator.PortSpec{
 			{Name: "http", ContainerPort: containerPort, Publish: true},
 		},
+		// FSGroup makes the PVC group-writable by the image's non-root
+		// openbao user on Kubernetes. No-op on Docker, where ownership is
+		// inherited from the image directory instead — see storagePath.
+		Security: orchestrator.SecurityOptions{FSGroup: &fsGroup},
 		// No Probes.Liveness: OpenBao's own image ships a working
 		// HEALTHCHECK; a generic TCP probe would only add a redundant
 		// failure mode (a sealed-but-listening OpenBao is a normal, healthy
