@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createSharedSecretSet,
+  deleteInstanceSecret,
   deleteSharedSecretSet,
+  fetchInstanceSecrets,
   fetchOpenbaoStatus,
   fetchSharedSecretSets,
   resetOpenbaoTokens,
+  writeInstanceSecret,
 } from "@common/api/openbao";
+import type { WriteInstanceSecretPayload } from "@common/api/openbao";
 import { successToast, errorToast } from "@common/utils/toast";
 
 export function useOpenbaoStatus(enabled: boolean) {
@@ -61,5 +65,46 @@ export function useResetOpenbaoTokens() {
       successToast(`Re-minted ${res.reminted} of ${res.instances} agent tokens${failed}`);
     },
     onError: (err) => errorToast("Failed to reset agent tokens", err),
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * Per-agent secrets
+ * ------------------------------------------------------------------------ */
+
+export function useInstanceSecrets(instanceId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ["instance-secrets", instanceId],
+    queryFn: () => fetchInstanceSecrets(instanceId),
+    enabled,
+    // No polling: the list is only changed from this panel or by the agent
+    // itself, and every value in it -- masked or not -- is secret material,
+    // so an idle tab should not keep asking for it.
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useWriteInstanceSecret(instanceId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: WriteInstanceSecretPayload) => writeInstanceSecret(instanceId, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instance-secrets", instanceId] });
+      successToast("Secret saved");
+    },
+    onError: (err) => errorToast("Failed to save secret", err),
+  });
+}
+
+export function useDeleteInstanceSecret(instanceId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ path, key }: { path: string; key?: string }) =>
+      deleteInstanceSecret(instanceId, path, key),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instance-secrets", instanceId] });
+      successToast("Secret deleted");
+    },
+    onError: (err) => errorToast("Failed to delete secret", err),
   });
 }

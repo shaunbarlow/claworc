@@ -4,12 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"time"
 )
+
+// ErrNotFound wraps every 404 OpenBao returns. Worth distinguishing from a
+// generic failure because in KV v2 a 404 is routinely the *expected* answer
+// rather than an error: reading a secret that was never written, or listing
+// a path prefix under which nothing exists yet, both 404. Callers that mean
+// "empty" by that use errors.Is(err, ErrNotFound); everyone else keeps
+// treating it as the failure it is for them.
+var ErrNotFound = errors.New("openbao: not found")
 
 // AdminClient talks to OpenBao's own HTTP API (Vault-API-compatible:
 // /v1/sys/*, /v1/auth/token/*, /v1/secret/*) using either the root token
@@ -186,6 +195,110 @@ func (c *AdminClient) CreateOrphanToken(ctx context.Context, policies []string, 
 	return resp.Auth.ClientToken, nil
 }
 
+// KV v2 splits every logical secret path across two API prefixes: the data
+// itself lives under secret/data/<path> and its version history under
+// secret/metadata/<path>. Listing is only available on the metadata prefix,
+// which is why ListSecretPaths and DeleteSecret address it while
+// ReadSecret/WriteSecret address the data one. Callers pass the logical path
+// (e.g. "agents/<uuid>/github") and this client adds the right prefix.
+//
+// Callers are responsible for validating path/field syntax before calling
+// (see handlers.validateSecretPath): these methods interpolate the path into
+// a URL as-is.
+
+// SecretEntry is one KV v2 secret: its current field set plus the version
+// metadata an admin UI needs to show when it last changed.
+type SecretEntry struct {
+	// Fields is the secret's current version's data map. Values are
+	// whatever JSON the writer stored -- agents writing via `bao kv put`
+	// always produce strings, but a raw API writer could store numbers or
+	// nested objects, so this stays interface{} rather than lying about it.
+	Fields map[string]interface{}
+	// Version is the current version number of the secret.
+	Version int
+	// CreatedTime is when the current version was written (RFC3339).
+	CreatedTime string
+}
+
+// ListSecretPaths lists the immediate children of a logical KV v2 path
+// prefix (which must end in "/", or be empty for the mount root). Child
+// names that are themselves prefixes come back with a trailing "/", exactly
+// as OpenBao reports them -- recursion is the caller's business.
+//
+// A prefix that has never been written to returns an empty slice and no
+// error: KV v2 answers 404 for it, which means "nothing here", not "broken".
+func (c *AdminClient) ListSecretPaths(ctx context.Context, prefix string) ([]string, error) {
+	var resp struct {
+		Data struct {
+			Keys []string `json:"keys"`
+		} `json:"data"`
+	}
+	// GET + ?list=true rather than the LIST HTTP verb OpenBao also accepts:
+	// identical semantics, but a standard method survives any proxy or
+	// middlebox between here and the workload.
+	err := c.do(ctx, http.MethodGet, "/v1/secret/metadata/"+prefix+"?list=true", nil, &resp, true)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return resp.Data.Keys, nil
+}
+
+// ReadSecret returns the current version of the secret at a logical KV v2
+// path. Returns ErrNotFound (wrapped) if it does not exist, so callers that
+// treat "not written yet" as a normal state can test for it.
+func (c *AdminClient) ReadSecret(ctx context.Context, path string) (SecretEntry, error) {
+	var resp struct {
+		Data struct {
+			Data     map[string]interface{} `json:"data"`
+			Metadata struct {
+				Version     int    `json:"version"`
+				CreatedTime string `json:"created_time"`
+				Destroyed   bool   `json:"destroyed"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+path, nil, &resp, true); err != nil {
+		return SecretEntry{}, err
+	}
+	return SecretEntry{
+		Fields:      resp.Data.Data,
+		Version:     resp.Data.Metadata.Version,
+		CreatedTime: resp.Data.Metadata.CreatedTime,
+	}, nil
+}
+
+// WriteSecret writes fields as the new current version of the secret at a
+// logical KV v2 path, creating the secret (and any intermediate path
+// prefixes, which KV v2 materialises implicitly) if it does not exist.
+//
+// KV v2 replaces the whole field set on write rather than merging, so a
+// caller changing one field of a multi-field secret must read, merge and
+// write the complete map back -- see handlers.PutInstanceSecret.
+func (c *AdminClient) WriteSecret(ctx context.Context, path string, fields map[string]interface{}) error {
+	body, err := json.Marshal(map[string]interface{}{"data": fields})
+	if err != nil {
+		return fmt.Errorf("encode secret payload: %w", err)
+	}
+	return c.do(ctx, http.MethodPost, "/v1/secret/data/"+path, body, nil, true)
+}
+
+// DeleteSecret permanently removes the secret at a logical KV v2 path,
+// including every version and its metadata. Deliberately the metadata
+// delete (the destructive one) and not the data delete, which only marks
+// the latest version deleted while leaving it recoverable and leaves the
+// key visible in listings -- an admin who removes a secret from the UI
+// means it to be gone.
+func (c *AdminClient) DeleteSecret(ctx context.Context, path string) error {
+	err := c.do(ctx, http.MethodDelete, "/v1/secret/metadata/"+path, nil, nil, true)
+	if err != nil && errors.Is(err, ErrNotFound) {
+		return nil // already gone; deleting is idempotent
+	}
+	return err
+}
+
 // do issues one request. requireToken=false is used only for the two
 // bootstrap endpoints (seal-status, init, unseal) that OpenBao itself does
 // not require a token for; every other call sets requireToken=true and
@@ -218,6 +331,9 @@ func (c *AdminClient) do(ctx context.Context, method, path string, body []byte, 
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("openbao %s %s: %w", method, path, ErrNotFound)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("openbao %s %s: %d %s", method, path, resp.StatusCode, string(respBody))
 	}

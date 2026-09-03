@@ -41,6 +41,7 @@ import {
 import { useProviders } from "@common/hooks/useProviders";
 import { useSettings } from "@common/hooks/useSettings";
 import SecretGrantsEditor from "@common/components/SecretGrantsEditor";
+import InstanceSecretsPanel from "@common/components/InstanceSecretsPanel";
 import type { SecretGrant } from "@common/types/instance";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -1390,14 +1391,20 @@ export default function AgentDetailPage() {
           {/* OpenBao secret access (per-instance, admin only) — only shown
               when the managed OpenBao deployment is enabled in Settings. */}
           {isAdmin && (settings?.openbao_enabled === true || settings?.openbao_enabled === "true") && (
-            <SecretGrantsEditor
-              availableSets={settings?.openbao_shared_sets ?? []}
-              grants={instance.secret_grants ?? []}
-              isSaving={updateMutation.isPending}
-              onSave={async (grants: SecretGrant[]) => {
-                await updateMutation.mutateAsync({ id: instanceId, payload: { secret_grants: grants } });
-              }}
-            />
+            <>
+              <SecretGrantsEditor
+                availableSets={settings?.openbao_shared_sets ?? []}
+                grants={instance.secret_grants ?? []}
+                isSaving={updateMutation.isPending}
+                onSave={async (grants: SecretGrant[]) => {
+                  await updateMutation.mutateAsync({ id: instanceId, payload: { secret_grants: grants } });
+                }}
+              />
+              {/* Contents of this agent's own namespace, browsable and
+                  writable by an admin (the grant editor above governs
+                  access to shared sets, not content). */}
+              <InstanceSecretsPanel instanceId={instanceId} />
+            </>
           )}
 
           {isAdmin && (settings?.connector_enabled === true || settings?.connector_enabled === "true") && (

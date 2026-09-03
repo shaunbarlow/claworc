@@ -387,6 +387,16 @@ func main() {
 			r.Get("/instances/{id}/stats", handlers.GetInstanceStats)
 			r.Get("/instances/{id}/providers", handlers.ListInstanceProviders)
 			r.Post("/instances/{id}/update-image", handlers.UpdateInstanceImage)
+
+			// Per-agent OpenBao secrets (this agent's own namespace only).
+			// Admin-gated inside the handlers rather than by a route group:
+			// the rest of this group is reachable by team managers too, and
+			// secret values are a higher bar than the rest of the instance
+			// API -- see resolveInstanceSecretRequest.
+			r.Get("/instances/{id}/secrets", handlers.ListInstanceSecrets)
+			r.Put("/instances/{id}/secrets", handlers.PutInstanceSecret)
+			r.Delete("/instances/{id}/secrets", handlers.DeleteInstanceSecret)
+			r.Get("/instances/{id}/secrets/reveal", handlers.RevealInstanceSecret)
 			r.Get("/ssh-fingerprint", handlers.GetSSHFingerprint)
 
 			// Files

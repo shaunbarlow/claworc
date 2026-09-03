@@ -39,6 +39,8 @@ internal/handlers/
   openbao.go           settings glue, ensureOpenbaoInitialized, applyOpenbaoAsync,
                        per-instance token/policy provisioning, env injection
   openbao_shared_sets.go  CRUD for named shared secret sets (Settings UI-driven)
+  openbao_secrets.go      per-agent secret browse/set/reveal/delete within one
+                          instance's own agents/<uuid>/ namespace (Agent detail UI)
 ```
 
 ### 2.1 Workload
@@ -124,6 +126,7 @@ Toggle semantics mirror `connector_enabled` exactly: turning it on triggers `ens
 - **Settings page**: new card (`OpenbaoSettings.tsx`, same shape as `ApiKeySettings.tsx`/connector's settings card) — enable toggle, image field, masked root-token/admin-token display (`has_override`-style, matching Brave key's masked-value convention — never shown in plaintext after generation). A small "Shared secret sets" management list (create-by-name, delete) lives here too.
 - **Agent form** (`AgentForm.tsx`): new "Secret grants" section — for each existing `SharedSecretSet`, a read/write/none selector. Renders to `Instance.SecretGrants` JSON on save.
 - **Instance detail**: optional small indicator "OpenBao: connected" once a token exists, matching the connector's per-instance indicator — nice-to-have, not blocking.
+- **Agent detail — secrets panel** (`InstanceSecretsPanel.tsx`, below the grant editor): lists every secret in that one agent's own `agents/<uuid>/` namespace with field names and masked values, and sets a single field on any path, creating the secret if it does not exist. Reveal and copy fetch one plaintext value at a time through a separate endpoint (`GET /instances/{id}/secrets/reveal`), each logged, so a list response never carries plaintext. Admin-only, and every path is built by prefixing the instance's own namespace, so the endpoint cannot address another agent's secrets or a shared set. Calls go out over Claworc's own admin token, not the agent's, so an admin can seed a secret for an agent that is stopped or has never booted.
 
 ## 6. Explicitly deferred (fast-follow, not v1)
 
