@@ -2559,7 +2559,7 @@ func UpdateInstanceConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instanceConn := sshproxy.NewSSHInstance(client)
-	if _, stderr, code, err := instanceConn.ExecOpenclaw(r.Context(), "gateway", "stop"); err != nil || code != 0 {
+	if _, stderr, code, err := instanceConn.ExecOpenclaw(r.Context(), "gateway", "stop", "--force"); err != nil || code != 0 {
 		log.Printf("Failed to restart gateway for instance %d: %v %s", inst.ID, err, stderr)
 	}
 
@@ -2900,7 +2900,7 @@ func applyBrowserEnabledConfig(ctx context.Context, agent sshproxy.Instance, nam
 		return
 	}
 	// Restart the gateway to pick up the change (s6 restarts it after stop).
-	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 		log.Printf("Error restarting gateway for %s after browser.enabled change: %v", utils.SanitizeForLog(name), err)
 	}
 }
@@ -3128,7 +3128,7 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 	}
 
 	// Restart gateway so it picks up new env vars and config
-	stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "gateway", "stop")
+	stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "gateway", "stop", "--force")
 	if err != nil {
 		log.Printf("Error restarting gateway for %s: %v", utils.SanitizeForLog(name), err)
 		return

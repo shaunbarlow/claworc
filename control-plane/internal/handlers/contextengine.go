@@ -332,7 +332,7 @@ func ensureContextEnginePluginInstalled(ctx context.Context, agent sshproxy.Inst
 		return false
 	}
 	log.Printf("context-engine-config: %s: installing %s for the %s context engine", name, spec, engine)
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", spec, "--acknowledge-clawhub-risk")
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", spec, "--accept-capabilities", "--force")
 	if err != nil {
 		log.Printf("context-engine-config: %s: %s install failed: %v", name, spec, err)
 		return false
@@ -460,7 +460,7 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 		"plugins.slots.contextEngine", engine)
 
 	if installedNow {
-		if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+		if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 			log.Printf("context-engine-config: %s: installed %s but could not restart the gateway: %v", name, engine, err)
 		}
 	}

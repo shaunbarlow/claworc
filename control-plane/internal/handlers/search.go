@@ -175,7 +175,7 @@ func ensureSearchPluginInstalled(ctx context.Context, agent sshproxy.Instance, n
 		return false
 	}
 	log.Printf("search-config: %s: installing %s for the %s search provider", name, spec, provider)
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", spec, "--acknowledge-clawhub-risk")
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", spec, "--accept-capabilities", "--force")
 	if err != nil {
 		log.Printf("search-config: %s: %s install failed: %v", name, spec, err)
 		return false
@@ -285,7 +285,7 @@ func applySearchConfig(ctx context.Context, agent sshproxy.Instance, name string
 		"tools.web.search.provider", provider)
 
 	if installedNow {
-		if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+		if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 			log.Printf("search-config: %s: installed %s but could not restart the gateway: %v", name, provider, err)
 		}
 	}

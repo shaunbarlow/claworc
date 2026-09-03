@@ -25,10 +25,9 @@ import (
 //
 // That env fallback only applies while the Slack plugin's channel surface is
 // accepted; an unaccepted plugin loses the channel and OpenClaw then suppresses
-// it as "ambient-only". The agent boot script re-accepts the surface on every
-// boot -- see accept_channel_plugin in
-// agent/instance/rootfs/etc/s6-overlay/s6-rc.d/svc-openclaw/run, which also
-// records why a botToken SecretRef is deliberately not used here.
+// it as "ambient-only". The agent boot script installs the plugin with
+// --accept-capabilities on every boot, and records why a botToken SecretRef is
+// deliberately not used here.
 const (
 	slackBotTokenEnvVar = "SLACK_BOT_TOKEN"
 	slackAppTokenEnvVar = "SLACK_APP_TOKEN"
@@ -237,7 +236,7 @@ func applySlackConfig(ctx context.Context, agent sshproxy.Instance, name, channe
 		log.Printf("Failed to set channels.slack for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
 		return
 	}
-	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 		log.Printf("Error restarting gateway for %s after Slack config change: %v", utils.SanitizeForLog(name), err)
 	}
 }

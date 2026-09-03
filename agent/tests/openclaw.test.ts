@@ -20,15 +20,14 @@ function structureOf(obj: any): any {
 
 describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
   // Wait for openclaw gateway to be ready.
-  // The init-openclaw-doctor oneshot runs `openclaw doctor --fix --non-interactive`
-  // (repairing any legacy config/state left by an older baked image), then the
-  // svc-openclaw run script applies several `openclaw config set` commands
-  // before starting the gateway — each spawns Node.js under QEMU emulation,
-  // which is very slow with concurrent containers. By the time browser.test.ts
-  // finishes, the gateway is usually ready.
-  // Under QEMU with multiple concurrent containers, doctor --fix + several
-  // `openclaw config set` commands can take 15+ minutes. The gateway only
-  // starts after all of those complete.
+  // The svc-openclaw run script installs the two channel plugins and applies
+  // several `openclaw config set` commands before starting the gateway. Each
+  // spawns Node.js under QEMU emulation, which is very slow with concurrent
+  // containers. By the time browser.test.ts finishes, the gateway is usually
+  // ready.
+  // Under QEMU with multiple concurrent containers, plugin installs plus the
+  // config writes can take 15+ minutes. The gateway only starts after all of
+  // those complete.
   beforeAll(async () => {
     const deadline = Date.now() + 900_000;
     while (Date.now() < deadline) {
@@ -58,6 +57,32 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     const result = exec(container!, ["stat", "-c", "%U:%G", "/home/claworc/.openclaw"]);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("claworc:claworc");
+  });
+
+  it("s6 directly supervises the OpenClaw gateway", () => {
+    const script = exec(container!, [
+      "cat",
+      "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
+    ]);
+    expect(script.exitCode).toBe(0);
+    expect(script.stdout).toContain(
+      "exec s6-setuidgid claworc /usr/bin/openclaw gateway run",
+    );
+    expect(script.stdout).not.toContain("tail -f /dev/null");
+  });
+
+  it("boot reconciles channel plugin capabilities", () => {
+    const script = exec(container!, [
+      "cat",
+      "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
+    ]);
+    expect(script.exitCode).toBe(0);
+    for (const plugin of ["@openclaw/slack", "@openclaw/discord"]) {
+      expect(script.stdout).toContain(
+        `plugins install ${plugin}`,
+      );
+    }
+    expect(script.stdout.match(/--accept-capabilities --force/g)).toHaveLength(2);
   });
 
   // chrome-data must be created by the desktop service (only when Chrome runs),
@@ -106,12 +131,6 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     // The stable parts of the config (gateway, browser, agents, meta, ...)
     // are what our integration actually cares about.
     //
-    // `agents.entries.main` is absent from the image-baked skeleton and gets
-    // written by the init-openclaw-doctor boot oneshot (doctor's agent
-    // identity migration). It is therefore also a canary: if it disappears
-    // from this snapshot, boot-time doctor stopped running rather than the
-    // config shape changing -- which is exactly the silent failure the
-    // HOME=/home/claworc fix in init-openclaw-doctor.sh exists to prevent.
     delete config.skills;
     delete config.plugins;
     delete config.hooks;
@@ -173,7 +192,7 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
   });
 
   it("openclaw gateway stop exits without crash", () => {
-    const result = execAsUser(container!, "openclaw gateway stop");
+    const result = execAsUser(container!, "openclaw gateway stop --force");
     expect(result.exitCode).toBeDefined();
   });
 

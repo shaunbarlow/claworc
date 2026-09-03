@@ -206,7 +206,7 @@ func TestApplyMemoryConfig_ArgvAndRestart(t *testing.T) {
 	if !ok || search["provider"] != "openai" {
 		t.Errorf("payload = %v", pushed)
 	}
-	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop"}) {
+	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop", "--force"}) {
 		t.Errorf("call[1] = %v, want gateway restart", mock.calls[1])
 	}
 }

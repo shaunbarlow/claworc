@@ -101,7 +101,7 @@ func EnsureChannelPluginInstalled(instanceID uint, instanceName, channelID strin
 		}
 
 		log.Printf("plugin-install: %s: installing %s for the %s channel", name, spec, channelID)
-		res, timedOut := execOpenclawBounded(client, pluginInstallTimeout, "plugins", "install", spec)
+		res, timedOut := execOpenclawBounded(client, pluginInstallTimeout, "plugins", "install", spec, "--accept-capabilities", "--force")
 		switch {
 		case timedOut:
 			log.Printf("plugin-install: %s: %s install timed out after %s", name, spec, pluginInstallTimeout)
@@ -118,7 +118,7 @@ func EnsureChannelPluginInstalled(instanceID uint, instanceName, channelID strin
 		// Restart the gateway so the freshly-discovered plugin goes through
 		// applyPluginAutoEnable, which is what actually turns it on -- the
 		// install alone leaves it discovered but disabled.
-		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 			log.Printf("plugin-install: %s: installed %s but could not restart the gateway: %v", name, spec, err)
 			return
 		}

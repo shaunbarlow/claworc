@@ -156,8 +156,8 @@ func TestConfigureInstance_ModelSet(t *testing.T) {
 	}
 	// Last call must be gateway stop
 	last := inst.calls[len(inst.calls)-1]
-	if last[0] != "gateway" || last[1] != "stop" {
-		t.Errorf("expected last call to be gateway stop, got %v", last)
+	if last[0] != "gateway" || last[1] != "stop" || !containsArg(last, "--force") {
+		t.Errorf("expected last call to be forced gateway stop, got %v", last)
 	}
 }
 
@@ -174,8 +174,8 @@ func TestConfigureInstance_GatewayStop(t *testing.T) {
 		t.Fatalf("expected at least 1 call (gateway stop), got %d", len(inst.calls))
 	}
 	last := inst.calls[len(inst.calls)-1]
-	if last[0] != "gateway" || last[1] != "stop" {
-		t.Errorf("expected gateway stop, got %v", last)
+	if last[0] != "gateway" || last[1] != "stop" || !containsArg(last, "--force") {
+		t.Errorf("expected forced gateway stop, got %v", last)
 	}
 }
 

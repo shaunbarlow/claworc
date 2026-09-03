@@ -314,7 +314,7 @@ func InstallInstancePlugin(w http.ResponseWriter, r *http.Request) {
 		if h != nil {
 			h.UpdateMessage("installing " + spec)
 		}
-		res, timedOut := execOpenclawBounded(client, pluginInstallTimeout, "plugins", "install", spec, "--acknowledge-clawhub-risk")
+		res, timedOut := execOpenclawBounded(client, pluginInstallTimeout, "plugins", "install", spec, "--accept-capabilities", "--force")
 		if timedOut {
 			return fmt.Errorf("install timed out after %s", pluginInstallTimeout)
 		}
@@ -327,7 +327,7 @@ func InstallInstancePlugin(w http.ResponseWriter, r *http.Request) {
 		if h != nil {
 			h.UpdateMessage("restarting gateway")
 		}
-		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 			return fmt.Errorf("installed but could not restart the gateway: %w", err)
 		}
 		invalidateInstancePlugins(instanceID)
@@ -392,7 +392,7 @@ func runPluginConfigAction(instanceID uint, args ...string) pluginActionResult {
 	if res.code != 0 {
 		return pluginActionResult{Error: utils.SanitizeForLog(res.stderr)}
 	}
-	if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(context.Background(), "gateway", "stop"); err != nil {
+	if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(context.Background(), "gateway", "stop", "--force"); err != nil {
 		return pluginActionResult{OK: true, Error: "applied, but could not restart the gateway: " + err.Error()}
 	}
 	invalidateInstancePlugins(instanceID)
@@ -487,7 +487,7 @@ func UninstallInstancePlugin(w http.ResponseWriter, r *http.Request) {
 		if h != nil {
 			h.UpdateMessage("restarting gateway")
 		}
-		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+		if _, _, _, err := sshproxy.NewSSHInstance(client).ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 			return fmt.Errorf("uninstalled but could not restart the gateway: %w", err)
 		}
 		invalidateInstancePlugins(instanceID)

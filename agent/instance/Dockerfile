@@ -3,7 +3,9 @@ FROM debian:bookworm-slim AS base
 ARG S6_OVERLAY_VERSION=3.2.0.2
 ARG TARGETARCH
 ARG USE_CHINA_MIRRORS=false
-ARG OPENCLAW_VERSION=latest
+# Keep the base image reproducible. Update this deliberately when validating a
+# newer OpenClaw release; the agent startup contract is version-sensitive.
+ARG OPENCLAW_VERSION=2026.8.2
 ARG OPENBAO_VERSION=2.6.2
 
 # Slim agent image: OpenClaw + sshd + cron only. The browser (Chromium /
@@ -104,11 +106,9 @@ COPY rootfs/ /
 
 RUN chmod +x /etc/s6-overlay/s6-rc.d/init-setup/up \
              /etc/s6-overlay/s6-rc.d/init-openclaw-seed/up \
-             /etc/s6-overlay/s6-rc.d/init-openclaw-doctor/up \
              /etc/s6-overlay/s6-rc.d/init-homebrew-seed/up \
              /etc/s6-overlay/scripts/init-setup.sh \
              /etc/s6-overlay/scripts/init-openclaw-seed.sh \
-             /etc/s6-overlay/scripts/init-openclaw-doctor.sh \
              /etc/s6-overlay/scripts/init-homebrew-seed.sh \
              /etc/s6-overlay/s6-rc.d/svc-openclaw/run \
              /etc/s6-overlay/s6-rc.d/svc-sshd/run \
@@ -153,10 +153,9 @@ RUN mkdir -p /opt/openclaw-skeleton && \
     rm -f /tmp/TOOLS.md
 # Root-run openclaw invocations during the build leave a root-owned 0700
 # /root/.openclaw behind. Nothing at runtime should read it -- every openclaw
-# process runs as claworc against /home/claworc/.openclaw -- but if HOME ever
-# leaks through as /root again (see init-openclaw-doctor.sh), an existing
-# root-owned state dir turns that into a hard EACCES instead of a harmless
-# miss. Ship the image without it.
+# process runs as claworc against /home/claworc/.openclaw -- but an existing
+# root-owned state dir would turn an accidental HOME leak into a hard EACCES.
+# Ship the image without it.
 RUN rm -rf /root/.openclaw
 
 # Reduce SUID surface.

@@ -219,10 +219,13 @@ func TestApplyContextEngineConfigInstallsAndRestartsWhenMissing(t *testing.T) {
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
-	if _, ok := findCall(agent.calls, "plugins", "install", "@martian-engineering/lossless-claw"); !ok {
+	argv, ok := findCall(agent.calls, "plugins", "install", "@martian-engineering/lossless-claw")
+	if !ok {
 		t.Errorf("plugin was never installed; calls: %v", agent.calls)
+	} else if !hasArg(argv, "--accept-capabilities") || !hasArg(argv, "--force") {
+		t.Errorf("plugin install must accept capabilities and force convergence: %v", argv)
 	}
-	if _, ok := findCall(agent.calls, "gateway", "stop"); !ok {
+	if _, ok := findCall(agent.calls, "gateway", "stop", "--force"); !ok {
 		t.Errorf("gateway was not restarted after a fresh install; calls: %v", agent.calls)
 	}
 }

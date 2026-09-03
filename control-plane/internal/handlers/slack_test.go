@@ -241,7 +241,7 @@ func TestApplySlackConfig_Argv(t *testing.T) {
 	if !reflect.DeepEqual(mock.calls[0], want) {
 		t.Errorf("call[0] = %v, want %v", mock.calls[0], want)
 	}
-	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop"}) {
+	if !reflect.DeepEqual(mock.calls[1], []string{"gateway", "stop", "--force"}) {
 		t.Errorf("call[1] = %v, want gateway restart", mock.calls[1])
 	}
 }

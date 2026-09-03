@@ -146,7 +146,7 @@ provider as a **custom provider**. OpenClaw only discovers models for custom pro
 the `models` array is always populated with the full definition (id, name, cost, context window,
 reasoning, etc.) for each model enabled on the instance.
 
-After writing the config, `openclaw gateway stop` is called so OpenClaw picks up the new settings.
+After writing the config, `openclaw gateway stop --force` is called so OpenClaw picks up the new settings.
 
 Source: `control-plane/internal/handlers/instances.go` — `ConfigureInstance`.
 

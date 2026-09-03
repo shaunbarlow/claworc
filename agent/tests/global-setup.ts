@@ -220,10 +220,10 @@ export async function setup(): Promise<void> {
       }
     }
 
-    // Note: openclaw gateway readiness is NOT checked here because
-    // `openclaw doctor --fix` + `openclaw config set` commands are extremely
-    // slow under QEMU emulation (~10+ minutes with concurrent containers).
-    // The openclaw.test.ts file handles its own gateway wait in beforeAll.
+    // Note: openclaw gateway readiness is NOT checked here because the startup
+    // plugin installs + `openclaw config set` commands are extremely slow under
+    // QEMU emulation (~10+ minutes with concurrent containers). The
+    // openclaw.test.ts file handles its own gateway wait in beforeAll.
 
     // Provision an in-container SSH keypair so env-vars.test.ts can open a
     // real SSH session back to 127.0.0.1. This reproduces the path used by

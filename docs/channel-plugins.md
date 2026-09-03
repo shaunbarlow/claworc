@@ -79,7 +79,7 @@ Both Claworc propagation paths end in a gateway start, which is what makes
 this reliable rather than lucky:
 
 - **Config-only edit** → `applyDiscordConfig`/`applySlackConfig` run
-  `config set` then `gateway stop`; s6 respawns `svc-openclaw`.
+  `config set` then `gateway stop --force`; s6 respawns `svc-openclaw`.
 - **Token change** → container restart → the boot script writes env + config →
   the gateway starts.
 

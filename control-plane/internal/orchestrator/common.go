@@ -53,7 +53,7 @@ func updateInstanceConfig(ctx context.Context, execFn ExecFunc, factory sshproxy
 	if err != nil {
 		return fmt.Errorf("get instance connection: %w", err)
 	}
-	if _, stderr, code, err := inst.ExecOpenclaw(ctx, "gateway", "stop"); err != nil || code != 0 {
+	if _, stderr, code, err := inst.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil || code != 0 {
 		return fmt.Errorf("restart gateway: %v %s", err, stderr)
 	}
 	return nil

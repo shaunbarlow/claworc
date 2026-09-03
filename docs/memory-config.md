@@ -63,7 +63,7 @@ config set memory <json> --replace --json`, so removed folders and cleared
 overrides disappear; never `config unset` first — that write is rejected by
 OpenClaw's size-drop guard, and when it does land ahead of a failing set the
 agent loses its memory config entirely) and restarts the gateway (`openclaw
-gateway stop`). Top-level `memory.*` has no dedicated hot-reload rule in
+gateway stop --force`). Top-level `memory.*` has no dedicated hot-reload rule in
 OpenClaw's config-reload planner (confirmed against the shipped
 `config-reload-plan` rule table), so it falls through to the default
 "restart" classification — a full Gateway restart is required either way.

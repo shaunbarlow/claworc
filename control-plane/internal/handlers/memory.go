@@ -329,7 +329,7 @@ func applyMemoryConfig(ctx context.Context, agent sshproxy.Instance, name string
 		return
 	}
 	// Restart the gateway to pick up the change (s6 restarts it after stop).
-	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop"); err != nil {
+	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
 		log.Printf("memory-config: gateway restart for %s: %v", utils.SanitizeForLog(name), err)
 	}
 }
