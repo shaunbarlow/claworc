@@ -35,10 +35,21 @@ jobs:
           else
             base="HEAD~1"
           fi
-          changed_models=$(git diff --name-only "$base"...HEAD -- 'control-plane/internal/database/models/*.go' || true)
+          # Only *substantive* model edits count. A comment-only change (a
+          # docstring correction, say) is not a schema change, so strip the
+          # diff down to added/removed lines that are neither pure Go
+          # comments nor blank before deciding. Without this the guard
+          # demanded a no-op migration for a doc typo fix -- which is how it
+          # failed on 3ef80f7, whose entire models.go diff was two comment
+          # lines.
+          changed_models=$(git diff --unified=0 "$base"...HEAD -- 'control-plane/internal/database/models/*.go' \
+            | grep -E '^[-+]' \
+            | grep -vE '^(\+\+\+|---)' \
+            | sed -E 's/^[-+][[:space:]]*//' \
+            | grep -vE '^(//|$)' || true)
           new_migrations=$(git diff --name-only --diff-filter=A "$base"...HEAD -- 'control-plane/internal/database/migrations/migration_*.go' || true)
           if [ -n "$changed_models" ] && [ -z "$new_migrations" ]; then
-            echo "ERROR: models.go changed but no new migration_*.go was added."
+            echo "ERROR: models.go changed (beyond comments) but no new migration_*.go was added."
             echo "       Run 'make migration' from control-plane/ to author one."
             exit 1
           fi
