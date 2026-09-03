@@ -202,7 +202,8 @@ type Instance struct {
 	SecretGrants string `gorm:"type:text;default:'[]'" json:"secret_grants"`
 	// OpenbaoToken is this instance's long-lived, orphaned OpenBao token
 	// (fernet-encrypted at rest), minted once by the control plane and
-	// injected into the container as OPENBAO_TOKEN / OPENBAO_ADDR. The
+	// injected into the container as BAO_TOKEN / BAO_ADDR, the names the
+	// baked-in bao CLI reads. The
 	// token's value never changes once minted; only the OpenBao policy
 	// attached to it is rewritten when SecretGrants changes. Empty = the
 	// instance has no OpenBao access yet (feature off, or minting hasn't

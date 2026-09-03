@@ -445,8 +445,50 @@ func buildOpenbaoEnvVars(inst *database.Instance) map[string]string {
 	if err != nil || plain == "" {
 		return out
 	}
-	out["OPENBAO_TOKEN"] = plain
-	out["OPENBAO_ADDR"] = fmt.Sprintf("http://%s:%d", openbaoprov.WorkloadName, openbaoContainerPortForEnv)
+	// BAO_ADDR/BAO_TOKEN and nothing else: these are the names the bao CLI
+	// actually reads, and the CLI is baked into the agent image precisely so
+	// agents can use it. v1 shipped OPENBAO_ADDR/OPENBAO_TOKEN, which the
+	// CLI ignores entirely -- a bare `bao kv get ...` then dialled its
+	// default https://127.0.0.1:8200 (connection refused) or, once an
+	// address was supplied by hand, sent no token and returned a bare
+	// "403 permission denied" that reads like a policy problem rather than a
+	// missing credential. Deliberately one set rather than both, so there is
+	// a single name for each value and no chance of the two diverging.
+	//
+	// The retired OPENBAO_* names stay in the drift-check "touched" lists at
+	// the call sites so their removal is detected too: an agent container
+	// created before this change still has them, and would otherwise keep
+	// serving a stale copy of the token indefinitely.
+	out["BAO_ADDR"] = fmt.Sprintf("http://%s:%d", openbaoprov.WorkloadName, openbaoContainerPortForEnv)
+	out["BAO_TOKEN"] = plain
+
+	// Secret paths are deliberately NOT injected: they are fully
+	// self-discoverable from the address and token alone. One call returns
+	// the token's complete effective ACL --
+	//
+	//   bao read -format=json sys/internal/ui/resultant-acl
+	//   (or: curl -H "X-Vault-Token: $BAO_TOKEN" \
+	//          "$BAO_ADDR/v1/sys/internal/ui/resultant-acl")
+	//
+	// whose glob_paths lists every readable/writable path with its
+	// capabilities, e.g. secret/data/agents/<uuid>/ for the agent's own
+	// namespace plus a secret/data/shared/<set>/ entry per granted shared
+	// set. Strip the data/ or metadata/ segment to get the logical path
+	// `bao kv` expects. The default policy grants this endpoint to every
+	// token, so it needs no extra capability.
+	//
+	// Preferred over injecting the paths for two reasons. It cannot go
+	// stale: rewriting an instance's grants takes effect immediately and the
+	// integration plan's "policy change never needs a container restart"
+	// rule depends on nothing cached in the container. And it covers shared
+	// sets, which an env var could only carry by drifting on every grant
+	// edit -- instanceEnvDrift compares every desired var, so such a var
+	// would force a restart of a running agent whenever grants changed.
+	//
+	// Note `bao token lookup` is NOT sufficient: it exposes only the policy
+	// *name* (agent-<uuid>), from which the agent's own namespace can be
+	// string-derived but shared sets cannot be seen at all. Reading the
+	// policy document itself (sys/policies/acl/*) is denied to agents.
 	return out
 }
 
@@ -472,7 +514,10 @@ func pushOpenbaoTokensForRunningInstances() {
 	for i := range instances {
 		inst := instances[i]
 		ensureInstanceOpenbaoToken(ctx, &inst)
-		EnsureEnvPropagated(ctx, inst, 0, "OPENBAO_TOKEN", "OPENBAO_ADDR")
+		// OPENBAO_* are no longer injected but must stay listed so a
+		// pre-existing container carrying them is seen as drifted and
+		// has them removed.
+		EnsureEnvPropagated(ctx, inst, 0, "BAO_TOKEN", "BAO_ADDR", "OPENBAO_TOKEN", "OPENBAO_ADDR")
 	}
 }
 
@@ -592,7 +637,10 @@ func ResetOpenbaoTokens(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		reminted++
-		EnsureEnvPropagated(ctx, inst, 0, "OPENBAO_TOKEN", "OPENBAO_ADDR")
+		// OPENBAO_* are no longer injected but must stay listed so a
+		// pre-existing container carrying them is seen as drifted and
+		// has them removed.
+		EnsureEnvPropagated(ctx, inst, 0, "BAO_TOKEN", "BAO_ADDR", "OPENBAO_TOKEN", "OPENBAO_ADDR")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

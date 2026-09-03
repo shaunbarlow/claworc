@@ -21,7 +21,7 @@
 | Shared sets | Admin-created/deleted ad hoc from the Claworc UI, arbitrary name, no fixed limit. Pure `{name}` records — the path prefix is derived from the name. |
 | Per-agent grant field | New instance-level config field: list of `{set_name, capability: "read"|"write"}`. Default capability when a set is granted with no explicit choice: **read**. Write is an explicit opt-in per grant. |
 | Token lifetime | **Long-lived.** No periodic renewal, no short TTL. Minted once (or on first policy change if none exists yet) with a large explicit TTL (10 years) since OpenBao does not have a true "infinite" token concept — periodic tokens or default system max-TTL would otherwise silently expire it. |
-| Token delivery | Two consumption paths from one token: (1) `OPENBAO_ADDR` + `OPENBAO_TOKEN` env vars into the container for direct script/`bao`-CLI use; (2) an OpenClaw `secrets.providers.openbao` exec-provider config block for SecretRef-eligible fields — **deferred to a fast-follow**, see §6, because it requires a resolver script baked into the agent image, which is a different repo/pipeline than control-plane wiring. |
+| Token delivery | Two consumption paths from one token: (1) `BAO_ADDR` + `BAO_TOKEN` env vars into the container for direct script/`bao`-CLI use -- these are the names the CLI reads, and are the only pair injected (v1 shipped `OPENBAO_ADDR`/`OPENBAO_TOKEN`, which the CLI ignores); (2) an OpenClaw `secrets.providers.openbao` exec-provider config block for SecretRef-eligible fields — **deferred to a fast-follow**, see §6, because it requires a resolver script baked into the agent image, which is a different repo/pipeline than control-plane wiring. |
 | Policy vs token on grant change | Token stays stable; only the OpenBao **policy** attached to it is rewritten when `SecretGrants` changes. |
 | Revocation on instance delete | **Leave-be for now.** No revoke, no orphan sweep. Matches the connector token's current stance before its own sync work landed. |
 | Audit logging | Out of scope. Not wired up. |
@@ -86,8 +86,8 @@ On instance create, and on any edit to `SecretGrants`:
 `buildOpenbaoEnvVars(inst)` (same shape as `buildConnectorEnvVars`), called from the same site in `instances.go` that injects `CLAWORC_INSTANCE_ID` / connector vars:
 
 ```go
-OPENBAO_ADDR  = "http://claworc-openbao:8200"
-OPENBAO_TOKEN = <decrypted per-instance token>
+BAO_ADDR      = "http://claworc-openbao:8200"
+BAO_TOKEN     = <decrypted per-instance token>
 ```
 
 Wired into `EnsureEnvPropagated`'s drift check the same way connector env vars are, so enabling the feature (or granting a new shared set) on an already-running instance restarts it to pick up the token if the token is newly minted, but does **not** restart on a pure policy change (the token value itself is unchanged — OpenBao re-evaluates policy server-side, no container-level drift).
@@ -127,7 +127,7 @@ Toggle semantics mirror `connector_enabled` exactly: turning it on triggers `ens
 
 ## 6. Explicitly deferred (fast-follow, not v1)
 
-- **SecretRef exec-provider wiring** (`secrets.providers.openbao` block rendered into `openclaw.json` pointing at a `bao`-CLI-compatible resolver): the `bao` CLI binary is now baked into the agent image (`agent/instance/Dockerfile`, pinned via `OPENBAO_VERSION`, downloaded from the `openbao/openbao` GitHub release matching `TARGETARCH`) — v1 shipped `OPENBAO_ADDR`/`OPENBAO_TOKEN` env vars only, and any script/exec-tool call can now use the `bao` CLI directly (`bao kv get ...`) without an operator installing it themselves. Still outstanding: the control-plane side — rendering a `secrets.providers.openbao` exec-provider block into `openclaw.json` so OpenClaw's own SecretRef-eligible config fields (model API keys etc.) can resolve against OpenBao.
+- **SecretRef exec-provider wiring** (`secrets.providers.openbao` block rendered into `openclaw.json` pointing at a `bao`-CLI-compatible resolver): the `bao` CLI binary is now baked into the agent image (`agent/instance/Dockerfile`, pinned via `OPENBAO_VERSION`, downloaded from the `openbao/openbao` GitHub release matching `TARGETARCH`) — v1 shipped `OPENBAO_ADDR`/`OPENBAO_TOKEN`, which the CLI does not read; those are retired in favour of `BAO_ADDR`/`BAO_TOKEN` so any script/exec-tool call can use the `bao` CLI directly (`bao kv get ...`) without an operator installing it themselves. Agents need no path configuration: `bao read sys/internal/ui/resultant-acl` returns the token's complete effective ACL, covering both its own `secret/agents/<uuid>/` namespace and any granted shared sets. Still outstanding: the control-plane side — rendering a `secrets.providers.openbao` exec-provider block into `openclaw.json` so OpenClaw's own SecretRef-eligible config fields (model API keys etc.) can resolve against OpenBao.
 - Revocation on instance delete, orphaned-token sweep on startup.
 - Audit log wiring.
 - Kubernetes-backend-specific parity review (Service/NetworkPolicy naming) — expected to fall out mostly for free via `Apply()`, same as the connector's Level 2, but not explicitly verified here.
