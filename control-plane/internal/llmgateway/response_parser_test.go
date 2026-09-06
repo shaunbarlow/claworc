@@ -115,6 +115,16 @@ func TestParseUsageOpenAIResponsesStream_WithCached(t *testing.T) {
 	}
 }
 
+func TestParseUsageOpenAIResponsesStream_CodexDoneType(t *testing.T) {
+	body := []byte(
+		"event: response.completed\n" +
+			`data: {"type":"response.done","response":{"status":"completed","usage":{"input_tokens":500,"input_tokens_details":{"cached_tokens":400},"output_tokens":25,"total_tokens":525}}}` + "\n")
+	in, out, cached := ParseUsageOpenAIResponsesStream(body)
+	if in != 500 || out != 25 || cached != 400 {
+		t.Errorf("got (%d, %d, %d), want (500, 25, 400)", in, out, cached)
+	}
+}
+
 func TestParseUsageAnthropicMessagesStream(t *testing.T) {
 	body := []byte("event: message_start\n" +
 		`data: {"type":"message_start","message":{"model":"claude-sonnet-4-20250514","id":"msg_01NSyhy93LurRhSyZStUHcMJ","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}}` + "\n\n" +

@@ -135,15 +135,21 @@ func ParseUsageOpenAIResponsesStream(body []byte) (inputTokens, outputTokens, ca
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if !strings.Contains(data, `"response.completed"`) {
+		if json.Unmarshal([]byte(data), &event) != nil {
 			continue
 		}
-		if json.Unmarshal([]byte(data), &event) == nil && event.Type == "response.completed" {
-			inputTokens = event.Response.Usage.InputTokens
-			outputTokens = event.Response.Usage.OutputTokens
-			cachedInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-			return
+		// Native OpenAI Responses terminates with response.completed. The
+		// ChatGPT/Codex-compatible endpoint uses response.done; the gateway's
+		// event-name rewriter changes the SSE event line for OpenClaw, but the
+		// JSON data type remains response.done. Accept both so usage is not
+		// silently recorded as 0/0 for the OAuth/proxy path.
+		if event.Type != "response.completed" && event.Type != "response.done" {
+			continue
 		}
+		inputTokens = event.Response.Usage.InputTokens
+		outputTokens = event.Response.Usage.OutputTokens
+		cachedInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
+		return
 	}
 	return
 }
