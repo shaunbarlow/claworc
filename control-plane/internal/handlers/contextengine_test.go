@@ -307,7 +307,7 @@ func TestApplyContextEngineConfigTeardownClearsOwnedPaths(t *testing.T) {
 	argv, ok := findCall(agent.calls, "config", "set", "session.reset")
 	if !ok {
 		t.Errorf("session.reset was not reconciled; calls: %v", agent.calls)
-	} else if !hasArg(argv, `{"mode":"idle","idleMinutes":10080}`) {
+	} else if !hasArg(argv, `{"idleMinutes":10080,"mode":"idle"}`) {
 		t.Errorf("session.reset payload = %v, want seven-day idle default", argv)
 	}
 }
