@@ -31,13 +31,25 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
   beforeAll(async () => {
     const deadline = Date.now() + 900_000;
     while (Date.now() < deadline) {
-      const result = exec(container!, ["pgrep", "-f", "openclaw gateway"]);
+      // OpenClaw 2026.9.x runs the gateway with the process name
+      // `openclaw-gateway`; older releases exposed `openclaw gateway` in the
+      // command line. Accept both so the readiness check follows the actual
+      // gateway process across supported image versions.
+      const result = exec(container!, [
+        "sh",
+        "-c",
+        "pgrep -x openclaw-gateway || pgrep -f 'openclaw gateway'",
+      ]);
       if (result.exitCode === 0 && result.stdout.trim()) break;
       await sleep(5_000);
     }
 
     // Final check
-    const check = exec(container!, ["pgrep", "-f", "openclaw gateway"]);
+    const check = exec(container!, [
+      "sh",
+      "-c",
+      "pgrep -x openclaw-gateway || pgrep -f 'openclaw gateway'",
+    ]);
     if (check.exitCode !== 0) {
       dumpDiagnostics(container!);
       throw new Error("openclaw gateway did not start within 900s");

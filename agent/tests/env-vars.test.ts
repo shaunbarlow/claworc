@@ -206,12 +206,15 @@ describe.skipIf(entries.length === 0).each(entries)(
     // ────────────────────────────────────────────────────────────────────
     describe("s6 services (with-contenv)", () => {
       it("openclaw process sees user-defined env vars", () => {
-        // pgrep for the gateway process and read its environ. `tr` converts
-        // nul-separated entries to newlines so grep can match per-line.
+        // pgrep for the gateway process and read its environ. OpenClaw
+        // 2026.9.x uses `openclaw-gateway` as the process name; older
+        // releases exposed `openclaw gateway` in the command line. `tr`
+        // converts nul-separated entries to newlines so grep can match
+        // per-line.
         const result = exec(container, [
           "bash",
           "-c",
-          `pid=$(pgrep -f 'openclaw gateway' | head -n1); test -n "$pid" && tr '\\0' '\\n' < /proc/$pid/environ`,
+          `pid=$(pgrep -x openclaw-gateway | head -n1); test -n "$pid" || pid=$(pgrep -f 'openclaw gateway' | head -n1); test -n "$pid" && tr '\\0' '\\n' < /proc/$pid/environ`,
         ]);
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("TEST_ENV_PLAIN=plain_value");
