@@ -300,9 +300,15 @@ func TestApplyContextEngineConfigTeardownClearsOwnedPaths(t *testing.T) {
 		}
 	}
 
-	// Nothing may be *written* on the teardown path.
-	if argv, ok := findCall(agent.calls, "config", "set"); ok {
-		t.Errorf("teardown wrote config: %v", argv)
+	// Session reset is a core OpenClaw setting and is reconciled even while
+	// tearing down the context-engine plugin paths. The plugin-owned paths
+	// above must be unset, but the inherited seven-day reset default is still
+	// written for the agent.
+	argv, ok := findCall(agent.calls, "config", "set", "session.reset")
+	if !ok {
+		t.Errorf("session.reset was not reconciled; calls: %v", agent.calls)
+	} else if !hasArg(argv, `{"mode":"idle","idleMinutes":10080}`) {
+		t.Errorf("session.reset payload = %v, want seven-day idle default", argv)
 	}
 }
 
