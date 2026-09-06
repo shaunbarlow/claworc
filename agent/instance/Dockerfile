@@ -3,9 +3,9 @@ FROM debian:bookworm-slim AS base
 ARG S6_OVERLAY_VERSION=3.2.0.2
 ARG TARGETARCH
 ARG USE_CHINA_MIRRORS=false
-# Keep the base image reproducible. Update this deliberately when validating a
-# newer OpenClaw release; the agent startup contract is version-sensitive.
-ARG OPENCLAW_VERSION=2026.8.2
+# Track the latest released OpenClaw by default. Stable image builds can still
+# override this with --build-arg OPENCLAW_VERSION=<version>.
+ARG OPENCLAW_VERSION=latest
 ARG OPENBAO_VERSION=2.6.2
 
 # Slim agent image: OpenClaw + sshd + cron only. The browser (Chromium /
