@@ -248,7 +248,8 @@ type catalogRootEntry struct {
 // Update a provider's block (and its "checked" date above) when it ships a
 // new model or changes pricing; there is no live source to sync these two
 // from anymore.
-var hardcodedCatalogOverrides = map[string]catalogRootEntry{
+var hardcodedCatalogOverrides = func() map[string]catalogRootEntry {
+	overrides := map[string]catalogRootEntry{
 	"anthropic": {
 		Name:      "anthropic",
 		Label:     "Anthropic",
@@ -344,7 +345,22 @@ var hardcodedCatalogOverrides = map[string]catalogRootEntry{
 			},
 		},
 	},
-}
+	}
+
+	// The ChatGPT OAuth/Codex catalog entry must expose the same model choices
+	// as the API-key OpenAI entry. Copy the pinned model slice rather than
+	// maintaining a second list that can drift the next time OpenAI ships a
+	// model. The endpoint metadata remains Codex-specific.
+	codex := overrides["openai"]
+	codex.Name = "openai-codex"
+	codex.Label = "OpenAI Codex (ChatGPT subscription)"
+	codex.APIFormat = "openai-codex-responses"
+	codex.BaseURL = "https://chatgpt.com/backend-api"
+	codex.Models = append([]catalogRootModel(nil), codex.Models...)
+	overrides["openai-codex"] = codex
+
+	return overrides
+}()
 
 func catalogIntPtr(v int) *int { return &v }
 

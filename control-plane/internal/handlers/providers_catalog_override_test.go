@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -15,19 +16,24 @@ func TestApplyCatalogOverridesReplacesMatchingEntry(t *testing.T) {
 		{Name: "openai", Label: "OpenAI", Models: []catalogRootModel{
 			{ModelID: "gpt-5.2"},
 		}},
+		{Name: "openai-codex", Label: "OpenAI Codex (stale)", Models: []catalogRootModel{
+			{ModelID: "gpt-5.2"},
+		}},
 	}
 	merged := applyCatalogOverrides(live)
-	if len(merged) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(merged))
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(merged))
 	}
 
-	var anthropic, openai *catalogRootEntry
+	var anthropic, openai, codex *catalogRootEntry
 	for i := range merged {
 		switch merged[i].Name {
 		case "anthropic":
 			anthropic = &merged[i]
 		case "openai":
 			openai = &merged[i]
+		case "openai-codex":
+			codex = &merged[i]
 		}
 	}
 	if anthropic == nil {
@@ -92,6 +98,15 @@ func TestApplyCatalogOverridesReplacesMatchingEntry(t *testing.T) {
 	if len(wantOpenAIIDs) != 0 {
 		t.Errorf("overridden openai entry is missing model ids: %v", wantOpenAIIDs)
 	}
+	if codex == nil {
+		t.Fatal("openai-codex entry missing from merged catalog")
+	}
+	if codex.APIFormat != "openai-codex-responses" || codex.BaseURL != "https://chatgpt.com/backend-api" {
+		t.Errorf("openai-codex endpoint metadata = %q/%q, want Codex OAuth endpoint", codex.APIFormat, codex.BaseURL)
+	}
+	if !reflect.DeepEqual(codex.Models, openai.Models) {
+		t.Errorf("openai-codex model selection differs from openai: codex=%+v openai=%+v", codex.Models, openai.Models)
+	}
 }
 
 // TestApplyCatalogOverridesAppendsWhenMissing asserts an override provider
@@ -102,8 +117,8 @@ func TestApplyCatalogOverridesAppendsWhenMissing(t *testing.T) {
 		{Name: "openai", Label: "OpenAI"},
 	}
 	merged := applyCatalogOverrides(live)
-	if len(merged) != 2 {
-		t.Fatalf("expected live entry + appended override, got %d entries", len(merged))
+	if len(merged) != 3 {
+		t.Fatalf("expected live entry + appended overrides, got %d entries", len(merged))
 	}
 	found := false
 	for _, e := range merged {
@@ -113,6 +128,15 @@ func TestApplyCatalogOverridesAppendsWhenMissing(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected anthropic override to be appended when absent from the live feed")
+	}
+	found = false
+	for _, e := range merged {
+		if e.Name == "openai-codex" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected openai-codex override to be appended when absent from the live feed")
 	}
 }
 
@@ -263,5 +287,24 @@ func TestHardcodedOpenAIOverrideShape(t *testing.T) {
 		if m.MaxTokens == nil {
 			t.Errorf("%s: max_tokens is nil", c.id)
 		}
+	}
+}
+
+// TestHardcodedOpenAICodexOverrideShape ensures the OAuth provider exposes the
+// same pinned model selection as OpenAI while retaining its own endpoint/API.
+func TestHardcodedOpenAICodexOverrideShape(t *testing.T) {
+	openai := hardcodedCatalogOverrides["openai"]
+	codex, ok := hardcodedCatalogOverrides["openai-codex"]
+	if !ok {
+		t.Fatal("expected a hardcoded openai-codex override to exist")
+	}
+	if codex.Name != "openai-codex" || codex.APIFormat != "openai-codex-responses" {
+		t.Errorf("openai-codex identity = %q/%q, want openai-codex/openai-codex-responses", codex.Name, codex.APIFormat)
+	}
+	if codex.BaseURL != "https://chatgpt.com/backend-api" {
+		t.Errorf("openai-codex base_url = %q, want https://chatgpt.com/backend-api", codex.BaseURL)
+	}
+	if !reflect.DeepEqual(codex.Models, openai.Models) {
+		t.Fatalf("openai-codex models must stay identical to the pinned openai models")
 	}
 }
