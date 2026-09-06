@@ -67,6 +67,8 @@ while true; do
     --remote-debugging-address=127.0.0.1 \
     --disable-default-apps \
     --disable-features=CloseWindowWithLastTab \
+    --disable-gpu \
+    --disable-dev-shm-usage \
     --disable-blink-features=AutomationControlled \
     --disable-infobars \
     --disable-component-update \
