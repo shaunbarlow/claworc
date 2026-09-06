@@ -89,7 +89,12 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
       "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
     ]);
     expect(script.exitCode).toBe(0);
-    for (const plugin of ["@openclaw/slack", "@openclaw/discord"]) {
+    for (const plugin of [
+      "@openclaw/slack",
+      "@openclaw/discord",
+      "@openclaw/brave-plugin",
+      "@martian-engineering/lossless-claw",
+    ]) {
       expect(script.stdout).toContain(
         `plugins install ${plugin}`,
       );

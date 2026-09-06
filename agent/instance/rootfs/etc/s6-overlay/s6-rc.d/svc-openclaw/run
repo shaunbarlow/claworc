@@ -32,6 +32,16 @@ if [ -n "$OPENCLAW_INITIAL_DISCORD" ]; then
         --accept-capabilities --force \
         || echo "svc-openclaw: could not install @openclaw/discord (continuing)"
 fi
+if [ -n "$OPENCLAW_INITIAL_BRAVE_PLUGIN" ]; then
+    s6-setuidgid claworc openclaw plugins install @openclaw/brave-plugin \
+        --accept-capabilities --force \
+        || echo "svc-openclaw: could not install @openclaw/brave-plugin (continuing)"
+fi
+if [ -n "$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN" ]; then
+    s6-setuidgid claworc openclaw plugins install @martian-engineering/lossless-claw \
+        --accept-capabilities --force \
+        || echo "svc-openclaw: could not install @martian-engineering/lossless-claw (continuing)"
+fi
 
 # Always reaffirm gateway settings — these are baked into the skeleton too,
 # but writing them here keeps a single source of truth and lets ops change

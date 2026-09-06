@@ -862,6 +862,14 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 	if discordEnv := renderInitialDiscordEnv(inst); discordEnv != "" {
 		envVars["OPENCLAW_INITIAL_DISCORD"] = discordEnv
 	}
+	// Official external plugins are reconciled by the agent boot script. The
+	// marker carries intent without putting provider credentials in config.
+	if effectiveSearchProvider(&inst) == "brave" {
+		envVars["OPENCLAW_INITIAL_BRAVE_PLUGIN"] = "1"
+	}
+	if effectiveContextEngine(&inst) == "lossless-claw" {
+		envVars["OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN"] = "1"
+	}
 	// Brave (or a future managed search provider) key rides the container
 	// environment the same way, and the env var is the only place it lives on
 	// the agent — the Brave plugin reads BRAVE_API_KEY itself, so the pushed
