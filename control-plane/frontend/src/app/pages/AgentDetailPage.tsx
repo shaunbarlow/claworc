@@ -1048,11 +1048,17 @@ export default function AgentDetailPage() {
                 { value: "lossless-claw", label: "Lossless Context Management" },
               ]}
               losslessClaw={instanceContextEngine.lossless_claw}
+              sessionReset={instanceContextEngine.session_reset}
+              effectiveSessionReset={instanceContextEngine.effective_session_reset}
               effectiveLosslessClaw={instanceContextEngine.effective_lossless_claw}
               inheritEngine={instanceContextEngine.default_engine}
               footnote="Config changes apply live; selecting lossless-claw for the first time installs the plugin and restarts the gateway."
-              onSave={async (contextEngine, losslessClaw) => {
-                await contextEngineMutation.mutateAsync({ context_engine: contextEngine, lossless_claw: losslessClaw });
+              onSave={async (contextEngine, losslessClaw, sessionReset) => {
+                await contextEngineMutation.mutateAsync({
+                  context_engine: contextEngine,
+                  lossless_claw: losslessClaw,
+                  session_reset: sessionReset,
+                });
               }}
               isSaving={contextEngineMutation.isPending}
             />

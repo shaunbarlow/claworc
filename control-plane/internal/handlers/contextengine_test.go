@@ -77,6 +77,27 @@ func TestParseLosslessClawSettingsValidation(t *testing.T) {
 	}
 }
 
+func TestParseSessionResetSettingsValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		wantErr bool
+	}{
+		{"valid idle reset", `{"mode":"idle","idle_minutes":10080}`, false},
+		{"valid daily reset", `{"mode":"daily"}`, false},
+		{"invalid reset mode", `{"mode":"weekly"}`, true},
+		{"invalid idle reset", `{"mode":"idle","idle_minutes":0}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseSessionResetSettings([]byte(tc.json))
+			if (err != nil) != tc.wantErr {
+				t.Errorf("parseSessionResetSettings(%s) error = %v, wantErr=%v", tc.json, err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // mergeLosslessClawSettings: set fields win over the global default; unset
 // fields inherit — same contract as mergeMemorySettings.
 func TestMergeLosslessClawSettings(t *testing.T) {

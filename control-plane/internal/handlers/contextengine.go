@@ -64,6 +64,61 @@ type LosslessClawFallbackProvider struct {
 	Model    string `json:"model"`
 }
 
+// SessionResetSettings controls OpenClaw's built-in session freshness policy.
+// Pointer fields preserve the distinction between an explicit value and an
+// unset per-instance override that inherits the global default.
+type SessionResetSettings struct {
+	Mode        string `json:"mode,omitempty"`
+	IdleMinutes *int   `json:"idle_minutes,omitempty"`
+}
+
+const defaultSessionResetIdleMinutes = 7 * 24 * 60
+
+func defaultSessionResetSettings() SessionResetSettings {
+	minutes := defaultSessionResetIdleMinutes
+	return SessionResetSettings{Mode: "idle", IdleMinutes: &minutes}
+}
+
+func parseSessionResetSettings(raw []byte) (SessionResetSettings, error) {
+	var s SessionResetSettings
+	if len(raw) == 0 || string(raw) == "null" {
+		return s, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
+		return s, err
+	}
+	switch s.Mode {
+	case "", "daily", "idle":
+	default:
+		return s, fmt.Errorf("mode must be \"daily\" or \"idle\"")
+	}
+	if s.IdleMinutes != nil && *s.IdleMinutes < 1 {
+		return s, fmt.Errorf("idle_minutes must be at least 1")
+	}
+	return s, nil
+}
+
+func loadSessionResetSettings(raw string) SessionResetSettings {
+	var s SessionResetSettings
+	if raw != "" {
+		json.Unmarshal([]byte(raw), &s)
+	}
+	return s
+}
+
+func mergeSessionResetSettings(global, override SessionResetSettings) SessionResetSettings {
+	out := global
+	if override.Mode != "" {
+		out.Mode = override.Mode
+	}
+	if override.IdleMinutes != nil {
+		out.IdleMinutes = override.IdleMinutes
+	}
+	return out
+}
+
 // LosslessClawSettings is the curated subset of lossless-claw's ~50-key
 // config schema (confirmed live via `openclaw plugins inspect lossless-claw
 // --json`) that Claworc manages with real form fields, plus a raw escape
@@ -379,6 +434,29 @@ func contextEngineConfigUnset(ctx context.Context, agent sshproxy.Instance, name
 	return false
 }
 
+func applySessionResetConfig(ctx context.Context, agent sshproxy.Instance, name string, inst *database.Instance) {
+	globalResetRaw, _ := database.GetSetting("default_session_reset")
+	globalReset := loadSessionResetSettings(globalResetRaw)
+	if globalReset.Mode == "" && globalReset.IdleMinutes == nil {
+		globalReset = defaultSessionResetSettings()
+	}
+	reset := mergeSessionResetSettings(globalReset, loadSessionResetSettings(inst.SessionResetSettings))
+	if reset.Mode == "" && reset.IdleMinutes == nil {
+		contextEngineConfigUnset(ctx, agent, name, "session.reset")
+		return
+	}
+	resetConfig := map[string]interface{}{}
+	if reset.Mode != "" {
+		resetConfig["mode"] = reset.Mode
+	}
+	if reset.IdleMinutes != nil {
+		resetConfig["idleMinutes"] = *reset.IdleMinutes
+	}
+	if resetJSON, err := json.Marshal(resetConfig); err == nil {
+		contextEngineConfigSet(ctx, agent, name, "session reset policy", "session.reset", string(resetJSON), "--replace", "--json")
+	}
+}
+
 // applyContextEngineConfig reconciles the agent's context-engine config over
 // SSH, in both directions: it writes Claworc's paths when a managed engine is
 // selected and clears them when the selection goes back to "legacy".
@@ -395,6 +473,9 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 	engine := effectiveContextEngine(inst)
 
 	if engine != "lossless-claw" {
+		// Session reset is an OpenClaw core setting, not a context-engine plugin
+		// setting, so reconcile it for both Legacy and Lossless Claw agents.
+		applySessionResetConfig(ctx, agent, name, inst)
 		// Back to legacy: drop the paths Claworc owns so an engine it
 		// previously pinned stops being used. Per docs/concepts/context-engine.md,
 		// uninstalling the selected plugin already resets the slot to
@@ -416,6 +497,7 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 	s := mergeLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings))
 
 	installedNow := ensureContextEnginePluginInstalled(ctx, agent, name, engine)
+	applySessionResetConfig(ctx, agent, name, inst)
 
 	cfg := buildLosslessClawConfig(s)
 	cfgJSON, err := json.Marshal(cfg)
@@ -515,6 +597,8 @@ type instanceContextEngineResponse struct {
 	DefaultEngine          string               `json:"default_engine"`
 	LosslessClaw           LosslessClawSettings `json:"lossless_claw"`           // per-instance override
 	EffectiveLosslessClaw  LosslessClawSettings `json:"effective_lossless_claw"` // global defaults + override
+	SessionReset           SessionResetSettings `json:"session_reset"`            // per-instance override
+	EffectiveSessionReset  SessionResetSettings `json:"effective_session_reset"` // global defaults + override
 	RestartsGatewayOnApply bool                 `json:"restarts_gateway_on_apply"`
 }
 
@@ -525,6 +609,12 @@ func buildInstanceContextEngineResponse(inst *database.Instance) instanceContext
 	}
 	globalRaw, _ := database.GetSetting("default_context_engine_settings")
 	override := loadLosslessClawSettings(inst.ContextEngineSettings)
+	globalResetRaw, _ := database.GetSetting("default_session_reset")
+	globalReset := loadSessionResetSettings(globalResetRaw)
+	if globalReset.Mode == "" && globalReset.IdleMinutes == nil {
+		globalReset = defaultSessionResetSettings()
+	}
+	reset := loadSessionResetSettings(inst.SessionResetSettings)
 
 	return instanceContextEngineResponse{
 		ContextEngine:          inst.ContextEngine,
@@ -532,6 +622,8 @@ func buildInstanceContextEngineResponse(inst *database.Instance) instanceContext
 		DefaultEngine:          defaultEngine,
 		LosslessClaw:           override,
 		EffectiveLosslessClaw:  mergeLosslessClawSettings(loadLosslessClawSettings(globalRaw), override),
+		SessionReset:           reset,
+		EffectiveSessionReset:  mergeSessionResetSettings(globalReset, reset),
 		RestartsGatewayOnApply: false,
 	}
 }
@@ -574,12 +666,13 @@ func SetInstanceContextEngine(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ContextEngine *string          `json:"context_engine"` // "" clears the override
 		LosslessClaw  *json.RawMessage `json:"lossless_claw"`  // full replacement of the override object
+		SessionReset  *json.RawMessage `json:"session_reset"`  // full replacement of the override object
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-	if body.ContextEngine == nil && body.LosslessClaw == nil {
+	if body.ContextEngine == nil && body.LosslessClaw == nil && body.SessionReset == nil {
 		writeError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
@@ -616,6 +709,20 @@ func SetInstanceContextEngine(w http.ResponseWriter, r *http.Request) {
 		updates["context_engine_settings"] = string(encoded)
 	}
 
+	if body.SessionReset != nil {
+		s, err := parseSessionResetSettings(*body.SessionReset)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid session_reset settings: "+err.Error())
+			return
+		}
+		encoded, err := json.Marshal(s)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to encode session_reset settings")
+			return
+		}
+		updates["session_reset_settings"] = string(encoded)
+	}
+
 	if err := database.DB.Model(&inst).Updates(updates).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update instance")
 		return
@@ -625,6 +732,9 @@ func SetInstanceContextEngine(w http.ResponseWriter, r *http.Request) {
 	}
 	if v, ok := updates["context_engine_settings"].(string); ok {
 		inst.ContextEngineSettings = v
+	}
+	if v, ok := updates["session_reset_settings"].(string); ok {
+		inst.SessionResetSettings = v
 	}
 
 	// Reconcile the agent's OpenClaw config (async, best-effort).

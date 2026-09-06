@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import type { LosslessClawFallbackProvider, LosslessClawSettings } from "@common/types/instance";
+import type { LosslessClawFallbackProvider, LosslessClawSettings, SessionResetSettings } from "@common/types/instance";
 
 export interface ContextEngineOption {
   value: "" | "legacy" | "lossless-claw";
@@ -13,13 +13,19 @@ interface Props {
   engine: "" | "legacy" | "lossless-claw";
   engineOptions: ContextEngineOption[];
   losslessClaw: LosslessClawSettings;
+  sessionReset: SessionResetSettings;
   /** Resolved values shown as placeholders when a field is unset (agent page). */
+  effectiveSessionReset?: SessionResetSettings;
   effectiveLosslessClaw?: LosslessClawSettings;
   /** Engine that applies when the "" (inherit) option is selected. */
   inheritEngine?: "legacy" | "lossless-claw";
   /** Shown under the Save button, e.g. a restart warning. */
   footnote?: string;
-  onSave: (engine: "" | "legacy" | "lossless-claw", losslessClaw: LosslessClawSettings) => Promise<void>;
+  onSave: (
+    engine: "" | "legacy" | "lossless-claw",
+    losslessClaw: LosslessClawSettings,
+    sessionReset: SessionResetSettings,
+  ) => Promise<void>;
   isSaving: boolean;
 }
 
@@ -35,6 +41,8 @@ export default function ContextEngineSettingsEditor({
   engine,
   engineOptions,
   losslessClaw,
+  sessionReset,
+  effectiveSessionReset,
   effectiveLosslessClaw,
   inheritEngine,
   footnote,
@@ -42,6 +50,10 @@ export default function ContextEngineSettingsEditor({
   isSaving,
 }: Props) {
   const [draftEngine, setDraftEngine] = useState<"" | "legacy" | "lossless-claw">(engine);
+  const [resetMode, setResetMode] = useState<"" | "daily" | "idle">(sessionReset.mode ?? "");
+  const [resetIdleMinutes, setResetIdleMinutes] = useState(
+    sessionReset.idle_minutes != null ? String(sessionReset.idle_minutes) : "",
+  );
   const [contextThreshold, setContextThreshold] = useState(
     losslessClaw.context_threshold != null ? String(losslessClaw.context_threshold) : "",
   );
@@ -87,6 +99,11 @@ export default function ContextEngineSettingsEditor({
     }
   }, [advanced]);
 
+  const resetIdleNum = resetIdleMinutes ? Number(resetIdleMinutes) : null;
+  const resetIdleError =
+    resetMode === "idle" && (resetIdleNum == null || Number.isNaN(resetIdleNum) || !Number.isInteger(resetIdleNum) || resetIdleNum < 1)
+      ? "Idle reset requires a positive whole number of minutes"
+      : null;
   const thresholdNum = contextThreshold ? Number(contextThreshold) : null;
   const thresholdError =
     thresholdNum != null && (Number.isNaN(thresholdNum) || thresholdNum < 0 || thresholdNum > 1)
@@ -97,6 +114,13 @@ export default function ContextEngineSettingsEditor({
     sweepDepthNum != null && (Number.isNaN(sweepDepthNum) || !Number.isInteger(sweepDepthNum) || sweepDepthNum < -1)
       ? "Must be -1 or a non-negative integer"
       : null;
+
+  const buildSessionReset = (): SessionResetSettings => {
+    const out: SessionResetSettings = {};
+    if (resetMode) out.mode = resetMode;
+    if (resetIdleMinutes) out.idle_minutes = Number(resetIdleMinutes);
+    return out;
+  };
 
   const buildLosslessClaw = (): LosslessClawSettings => {
     const out: LosslessClawSettings = {};
@@ -117,9 +141,9 @@ export default function ContextEngineSettingsEditor({
   };
 
   const dirty = useMemo(() => {
-    const current = JSON.stringify({ e: engine, l: losslessClaw });
+    const current = JSON.stringify({ e: engine, l: losslessClaw, r: sessionReset });
     try {
-      return current !== JSON.stringify({ e: draftEngine, l: buildLosslessClaw() });
+      return current !== JSON.stringify({ e: draftEngine, l: buildLosslessClaw(), r: buildSessionReset() });
     } catch {
       return true;
     }
@@ -127,6 +151,7 @@ export default function ContextEngineSettingsEditor({
   }, [
     engine,
     losslessClaw,
+    sessionReset,
     draftEngine,
     contextThreshold,
     freshTailCount,
@@ -141,9 +166,11 @@ export default function ContextEngineSettingsEditor({
     fallbackProviders,
     advanced,
     advancedError,
+    resetMode,
+    resetIdleMinutes,
   ]);
 
-  const canSave = dirty && !isSaving && !advancedError && !thresholdError && !sweepDepthError;
+  const canSave = dirty && !isSaving && !advancedError && !thresholdError && !sweepDepthError && !resetIdleError;
   const effectiveDraftEngine = draftEngine === "" ? (inheritEngine ?? "legacy") : draftEngine;
   const losslessVisible = effectiveDraftEngine === "lossless-claw";
 
@@ -188,6 +215,24 @@ export default function ContextEngineSettingsEditor({
             Management (lossless-claw) is a plugin engine with DAG-based summarization and lossless recall
             tools.
           </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Session Reset Mode</label>
+            <select value={resetMode} onChange={(e) => setResetMode(e.target.value as "" | "daily" | "idle")} className={inputCls}>
+              <option value="">{effectiveSessionReset?.mode ? `Inherit (${effectiveSessionReset.mode})` : "OpenClaw default (daily)"}</option>
+              <option value="daily">Daily</option>
+              <option value="idle">Idle timeout</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Controls OpenClaw's core session.reset policy for both context engines.</p>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Idle Reset (minutes)</label>
+            <input type="number" min={1} value={resetIdleMinutes} onChange={(e) => setResetIdleMinutes(e.target.value)} placeholder={effectiveSessionReset?.idle_minutes != null ? String(effectiveSessionReset.idle_minutes) : "10080"} className={inputCls} />
+            {resetIdleError && <p className="mt-1 text-xs text-red-600">{resetIdleError}</p>}
+            <p className="mt-1 text-xs text-gray-500">Used when reset mode is Idle; leave blank to inherit.</p>
+          </div>
         </div>
 
         {losslessVisible && (
@@ -431,7 +476,7 @@ export default function ContextEngineSettingsEditor({
           <button
             type="button"
             disabled={!canSave}
-            onClick={() => onSave(draftEngine, buildLosslessClaw())}
+            onClick={() => onSave(draftEngine, buildLosslessClaw(), buildSessionReset())}
             className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? "Saving..." : "Save"}

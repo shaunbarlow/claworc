@@ -137,6 +137,9 @@ type Instance struct {
 	// (field-wise; instance wins). Only meaningful when the effective context
 	// engine is "lossless-claw".
 	ContextEngineSettings string `gorm:"type:text;default:'{}'" json:"-"`
+	// SessionResetSettings is a JSON override for OpenClaw's core session.reset
+	// policy, merged on top of the global default_session_reset setting.
+	SessionResetSettings string `gorm:"type:text;default:'{}'" json:"-"`
 	// SlackConfig holds the structured per-instance Slack connection settings
 	// (enabled flag, channel allowlist, DM policy) as JSON. It is rendered
 	// into the agent's OpenClaw `channels.slack` config block at boot via the

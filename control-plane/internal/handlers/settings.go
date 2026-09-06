@@ -142,6 +142,12 @@ func settingsToResponse(raw map[string]string) map[string]interface{} {
 
 	// Global lossless-claw context-engine defaults (JSON LosslessClawSettings object).
 	result["default_context_engine_settings"] = loadLosslessClawSettings(raw["default_context_engine_settings"])
+	// Global OpenClaw core session-reset defaults, shared by both context engines.
+	globalReset := loadSessionResetSettings(raw["default_session_reset"])
+	if globalReset.Mode == "" && globalReset.IdleMinutes == nil {
+		globalReset = defaultSessionResetSettings()
+	}
+	result["default_session_reset"] = globalReset
 
 	return result
 }
@@ -349,6 +355,23 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if v, ok := raw["default_session_reset"]; ok {
+		b, err := json.Marshal(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_session_reset")
+			return
+		}
+		if _, err := parseSessionResetSettings(b); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid default_session_reset: "+err.Error())
+			return
+		}
+		prev, _ := database.GetSetting("default_session_reset")
+		if string(b) != prev {
+			contextEngineChanged = true
+		}
+		database.SetSetting("default_session_reset", string(b))
+	}
+
 	if v, ok := raw["default_context_engine_settings"]; ok {
 		b, err := json.Marshal(v)
 		if err != nil {

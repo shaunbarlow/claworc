@@ -2645,6 +2645,7 @@ func CloneInstance(w http.ResponseWriter, r *http.Request) {
 		// context the same way the original does.
 		ContextEngine:         src.ContextEngine,
 		ContextEngineSettings: src.ContextEngineSettings,
+		SessionResetSettings:  src.SessionResetSettings,
 		// Carry over placement/service config so the clone schedules and is
 		// reachable the same way the original is.
 		PodAnnotations:            src.PodAnnotations,

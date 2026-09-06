@@ -37,6 +37,8 @@ export interface Settings {
   default_context_engine: "" | "legacy" | "lossless-claw";
   /** Global lossless-claw settings defaults, merged under per-agent overrides. */
   default_context_engine_settings: import("./instance").LosslessClawSettings;
+  /** Global OpenClaw core session reset defaults, shared by both context engines. */
+  default_session_reset: import("./instance").SessionResetSettings;
   /** "unset" until the user has answered the consent prompt; then "opt_in" or "opt_out". */
   analytics_consent: "unset" | "opt_in" | "opt_out";
   /** Random 32-char hex ID reported alongside anonymous events. Read-only. */
@@ -92,6 +94,7 @@ export interface SettingsUpdatePayload {
   default_search_provider?: "" | "brave";
   default_context_engine?: "" | "legacy" | "lossless-claw";
   default_context_engine_settings?: import("./instance").LosslessClawSettings;
+  default_session_reset?: import("./instance").SessionResetSettings;
   connector_enabled?: boolean | string;
   connector_image?: string;
   connector_storage?: string;

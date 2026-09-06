@@ -551,10 +551,12 @@ function EnvironmentTab({
   const handleSaveContextEngineDefaults = async (
     engine: "" | "legacy" | "lossless-claw",
     losslessClaw: import("@common/types/instance").LosslessClawSettings,
+    sessionReset: import("@common/types/instance").SessionResetSettings,
   ) => {
     await placementMutation.mutateAsync({
       default_context_engine: engine === "" ? "legacy" : engine,
       default_context_engine_settings: losslessClaw,
+      default_session_reset: sessionReset,
     });
   };
 
@@ -706,6 +708,8 @@ function EnvironmentTab({
           { value: "lossless-claw", label: "Lossless Context Management" },
         ]}
         losslessClaw={settings.default_context_engine_settings ?? {}}
+        sessionReset={settings.default_session_reset ?? {}}
+        effectiveSessionReset={settings.default_session_reset ?? {}}
         footnote="Config changes apply live to every running agent; selecting lossless-claw for an agent that doesn't have it yet installs the plugin and restarts that agent's gateway."
         onSave={handleSaveContextEngineDefaults}
         isSaving={placementMutation.isPending}

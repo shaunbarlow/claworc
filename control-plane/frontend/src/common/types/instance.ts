@@ -285,6 +285,11 @@ export interface LosslessClawFallbackProvider {
   model: string;
 }
 
+export interface SessionResetSettings {
+  mode?: "daily" | "idle";
+  idle_minutes?: number;
+}
+
 /** Curated lossless-claw context-engine settings managed by Claworc.
  * Unset fields inherit: instance override -> global default -> plugin default.
  * See internal/handlers/contextengine.go's LosslessClawSettings for the
@@ -326,6 +331,8 @@ export interface InstanceContextEngine {
   default_engine: "legacy" | "lossless-claw";
   lossless_claw: LosslessClawSettings;
   effective_lossless_claw: LosslessClawSettings;
+  session_reset: SessionResetSettings;
+  effective_session_reset: SessionResetSettings;
   restarts_gateway_on_apply: boolean;
 }
 
@@ -333,4 +340,5 @@ export interface InstanceContextEngineUpdatePayload {
   context_engine?: "" | "legacy" | "lossless-claw";
   /** Full replacement of the per-instance override object. */
   lossless_claw?: LosslessClawSettings;
+  session_reset?: SessionResetSettings;
 }
