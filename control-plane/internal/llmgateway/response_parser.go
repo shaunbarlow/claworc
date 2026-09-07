@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"strings"
 )
 
@@ -113,43 +116,120 @@ func ParseUsageOpenAICompletionsStream(body []byte) (inputTokens, outputTokens, 
 	return
 }
 
-// ParseUsageOpenAIResponsesStream extracts token counts from a buffered OpenAI Responses API SSE stream.
-// Token counts are carried in the response.completed event under response.usage.
-func ParseUsageOpenAIResponsesStream(body []byte) (inputTokens, outputTokens, cachedInputTokens int) {
-	var event struct {
-		Type     string `json:"type"`
-		Response struct {
-			Usage struct {
-				InputTokens        int `json:"input_tokens"`
-				OutputTokens       int `json:"output_tokens"`
-				InputTokensDetails struct {
-					CachedTokens int `json:"cached_tokens"`
-				} `json:"input_tokens_details"`
-			} `json:"usage"`
-		} `json:"response"`
+const maxSSEEventDataBytes = 16 << 20 // 16 MiB
+
+// forEachSSEEvent reads complete SSE frames without bufio.Scanner's 64 KiB
+// token limit. SSE permits an event's JSON payload to span multiple data:
+// fields; their values are joined with newlines before being decoded.
+func forEachSSEEvent(body []byte, fn func(eventName string, data []byte) bool) error {
+	reader := bufio.NewReader(bytes.NewReader(body))
+	var eventName string
+	var data bytes.Buffer
+
+	dispatch := func() bool {
+		if data.Len() == 0 {
+			eventName = ""
+			return true
+		}
+		payload := data.Bytes()
+		// SSE appends a newline after every data field and removes the final one
+		// when dispatching the event.
+		payload = payload[:len(payload)-1]
+		keepGoing := fn(eventName, payload)
+		eventName = ""
+		data.Reset()
+		return keepGoing
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(body))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
+
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimSuffix(line, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			switch {
+			case line == "":
+				if !dispatch() {
+					return nil
+				}
+			case strings.HasPrefix(line, "event:"):
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				value := strings.TrimPrefix(line, "data:")
+				if strings.HasPrefix(value, " ") {
+					value = value[1:]
+				}
+				if data.Len()+len(value)+1 > maxSSEEventDataBytes {
+					return fmt.Errorf("SSE event data exceeds %d bytes", maxSSEEventDataBytes)
+				}
+				data.WriteString(value)
+				data.WriteByte('\n')
+			}
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if json.Unmarshal([]byte(data), &event) != nil {
-			continue
+		if err != nil {
+			if err != io.EOF {
+				return err
+			}
+			// Be liberal with upstreams that omit the final blank line.
+			dispatch()
+			return nil
 		}
-		// Native OpenAI Responses terminates with response.completed. The
-		// ChatGPT/Codex-compatible endpoint uses response.done; the gateway's
-		// event-name rewriter changes the SSE event line for OpenClaw, but the
-		// JSON data type remains response.done. Accept both so usage is not
-		// silently recorded as 0/0 for the OAuth/proxy path.
-		if event.Type != "response.completed" && event.Type != "response.done" {
-			continue
+	}
+}
+
+// ParseUsageOpenAIResponsesStream extracts token counts from a buffered OpenAI Responses API SSE stream.
+// Token counts are carried in response.completed (native OpenAI), response.done
+// (ChatGPT/Codex), or response.incomplete terminal events under response.usage.
+func ParseUsageOpenAIResponsesStream(body []byte) (inputTokens, outputTokens, cachedInputTokens int) {
+	type responseUsage struct {
+		InputTokens        int `json:"input_tokens"`
+		OutputTokens       int `json:"output_tokens"`
+		InputTokensDetails struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"input_tokens_details"`
+	}
+	isTerminal := func(eventType string) bool {
+		switch eventType {
+		case "response.completed", "response.done", "response.incomplete":
+			return true
+		default:
+			return false
+		}
+	}
+
+	sawTerminal := false
+	err := forEachSSEEvent(body, func(eventName string, data []byte) bool {
+		if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+			return true
+		}
+		var event struct {
+			Type     string `json:"type"`
+			Response struct {
+				Usage *responseUsage `json:"usage"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal(data, &event); err != nil {
+			if isTerminal(eventName) {
+				log.Printf("[gateway] OpenAI Responses usage parser could not decode terminal SSE event type=%s bytes=%d", safeLog(eventName), len(data))
+			}
+			return true
+		}
+		if !isTerminal(event.Type) {
+			return true
+		}
+		sawTerminal = true
+		if event.Response.Usage == nil {
+			log.Printf("[gateway] OpenAI Responses terminal SSE event has no usage type=%s bytes=%d", safeLog(event.Type), len(data))
+			return false
 		}
 		inputTokens = event.Response.Usage.InputTokens
 		outputTokens = event.Response.Usage.OutputTokens
 		cachedInputTokens = event.Response.Usage.InputTokensDetails.CachedTokens
-		return
+		return false
+	})
+	if err != nil {
+		log.Printf("[gateway] OpenAI Responses usage parser failed captured_bytes=%d error=%v", len(body), err)
+	} else if !sawTerminal {
+		log.Printf("[gateway] OpenAI Responses usage parser found no terminal SSE event captured_bytes=%d", len(body))
 	}
 	return
 }

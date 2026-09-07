@@ -1,6 +1,11 @@
 package llmgateway
 
-import "testing"
+import (
+	"bytes"
+	"log"
+	"strings"
+	"testing"
+)
 
 func TestParseUsageOpenAICompletions(t *testing.T) {
 	body := []byte(`{
@@ -122,6 +127,94 @@ func TestParseUsageOpenAIResponsesStream_CodexDoneType(t *testing.T) {
 	in, out, cached := ParseUsageOpenAIResponsesStream(body)
 	if in != 500 || out != 25 || cached != 400 {
 		t.Errorf("got (%d, %d, %d), want (500, 25, 400)", in, out, cached)
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_LargeTerminalEvent(t *testing.T) {
+	// Codex can repeat encrypted reasoning/output in the terminal response,
+	// making a single data field larger than bufio.Scanner's 64 KiB default.
+	padding := strings.Repeat("x", 70*1024)
+	body := []byte("event: response.done\n" +
+		`data: {"type":"response.done","response":{"output":[{"encrypted_content":"` + padding +
+		`"}],"usage":{"input_tokens":700,"input_tokens_details":{"cached_tokens":600},"output_tokens":30}}}` + "\n\n")
+
+	in, out, cached := ParseUsageOpenAIResponsesStream(body)
+	if in != 700 || out != 30 || cached != 600 {
+		t.Errorf("got (%d, %d, %d), want (700, 30, 600)", in, out, cached)
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_MultilineDataAndCRLF(t *testing.T) {
+	body := []byte("event: response.completed\r\n" +
+		`data: {"type":"response.completed",` + "\r\n" +
+		`data: "response":{"usage":{"input_tokens":41,"input_tokens_details":{"cached_tokens":11},"output_tokens":9}}}` + "\r\n\r\n")
+
+	in, out, cached := ParseUsageOpenAIResponsesStream(body)
+	if in != 41 || out != 9 || cached != 11 {
+		t.Errorf("got (%d, %d, %d), want (41, 9, 11)", in, out, cached)
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_IncompleteWithUsage(t *testing.T) {
+	body := []byte("event: response.incomplete\n" +
+		`data: {"type":"response.incomplete","response":{"status":"incomplete","usage":{"input_tokens":90,"input_tokens_details":{"cached_tokens":20},"output_tokens":7}}}` + "\n\n")
+
+	in, out, cached := ParseUsageOpenAIResponsesStream(body)
+	if in != 90 || out != 7 || cached != 20 {
+		t.Errorf("got (%d, %d, %d), want (90, 7, 20)", in, out, cached)
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_LogsSafeTerminalDecodeFailure(t *testing.T) {
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
+
+	body := []byte("event: response.done\n" +
+		`data: {"type":"response.done","secret":"must-not-appear"` + "\n\n")
+	in, out, cached := ParseUsageOpenAIResponsesStream(body)
+	if in != 0 || out != 0 || cached != 0 {
+		t.Errorf("got (%d, %d, %d), want (0, 0, 0)", in, out, cached)
+	}
+	if !strings.Contains(logs.String(), "could not decode terminal SSE event") {
+		t.Fatalf("expected safe parser warning, got %q", logs.String())
+	}
+	if strings.Contains(logs.String(), "must-not-appear") {
+		t.Fatalf("parser warning leaked response data: %q", logs.String())
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_LogsMissingTerminal(t *testing.T) {
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
+
+	body := []byte("event: response.output_text.delta\n" +
+		`data: {"type":"response.output_text.delta","delta":"sensitive text"}` + "\n\n")
+	ParseUsageOpenAIResponsesStream(body)
+
+	if !strings.Contains(logs.String(), "found no terminal SSE event") {
+		t.Fatalf("expected missing-terminal warning, got %q", logs.String())
+	}
+	if strings.Contains(logs.String(), "sensitive text") {
+		t.Fatalf("parser warning leaked response data: %q", logs.String())
+	}
+}
+
+func TestParseUsageOpenAIResponsesStream_LogsMissingUsage(t *testing.T) {
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
+
+	body := []byte("event: response.done\n" +
+		`data: {"type":"response.done","response":{"status":"completed"}}` + "\n\n")
+	ParseUsageOpenAIResponsesStream(body)
+
+	if !strings.Contains(logs.String(), "terminal SSE event has no usage") {
+		t.Fatalf("expected missing-usage warning, got %q", logs.String())
 	}
 }
 
