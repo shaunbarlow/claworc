@@ -304,7 +304,19 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Copy response headers, skipping headers that could enable XSS or cache poisoning.
 	// Content-Type is overridden below with a validated safe value.
 	upstreamCT := resp.Header.Get("Content-Type")
-	isStreaming := strings.Contains(upstreamCT, "text/event-stream")
+	// ChatGPT's /codex/responses streams SSE without labelling the body
+	// text/event-stream. The gateway forces stream=true for that api type (see
+	// rewriteCodexRequestBody), so its response is a stream by construction —
+	// trust that over the header. Without this the buffered path runs the
+	// non-streaming parser over an SSE body, which records 0 tokens and $0.00
+	// cost for every codex request, and also denies the client incremental
+	// delivery and the response.done event rewrite.
+	labelledSSE := strings.Contains(upstreamCT, "text/event-stream")
+	isStreaming := labelledSSE || apiType == APITypeOpenAICodexResponses
+	if isStreaming && !labelledSSE {
+		log.Printf("[gateway] treating unlabelled response as SSE api_type=%s content_type=%q",
+			safeLog(apiType), safeLog(upstreamCT))
+	}
 	skipHeaders := map[string]bool{
 		"content-type":           true, // overridden below with a safe allowlisted value
 		"x-content-type-options": true, // set explicitly below

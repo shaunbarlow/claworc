@@ -41,11 +41,16 @@ func ParseUsageOpenAIResponses(body []byte) (inputTokens, outputTokens, cachedIn
 			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
-	if json.Unmarshal(body, &u) == nil {
-		inputTokens = u.Usage.InputTokens
-		outputTokens = u.Usage.OutputTokens
-		cachedInputTokens = u.Usage.InputTokensDetails.CachedTokens
+	if err := json.Unmarshal(body, &u); err != nil {
+		// A silent return here is how an SSE body routed to the non-streaming
+		// parser hid as 0 tokens: the streaming path is instrumented, this one
+		// was not.
+		log.Printf("[gateway] OpenAI Responses usage parser could not decode non-streaming body bytes=%d error=%v", len(body), err)
+		return
 	}
+	inputTokens = u.Usage.InputTokens
+	outputTokens = u.Usage.OutputTokens
+	cachedInputTokens = u.Usage.InputTokensDetails.CachedTokens
 	return
 }
 
