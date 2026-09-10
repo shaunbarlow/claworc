@@ -106,6 +106,11 @@ export async function updateProvider(
   return data;
 }
 
+export async function refreshProviderOAuth(id: number): Promise<LLMProvider> {
+  const { data } = await client.post<LLMProvider>(`/llm/providers/${id}/oauth/refresh`);
+  return data;
+}
+
 export async function deleteProvider(id: number): Promise<void> {
   await client.delete(`/llm/providers/${id}`);
 }

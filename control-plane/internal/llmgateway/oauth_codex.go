@@ -62,6 +62,17 @@ func providerOAuthLock(providerID uint) *sync.Mutex {
 // refresh token; otherwise an error is returned and the caller should surface
 // a 401 with a hint to re-link the account.
 func EnsureFreshOAuthToken(ctx context.Context, providerID uint) (access, accountID string, err error) {
+	return ensureOAuthToken(ctx, providerID, false)
+}
+
+// ForceRefreshOAuthToken refreshes the stored Codex OAuth credentials even
+// when the access token has not reached the normal refresh window. It is used
+// by the control-plane's explicit "Refresh now" action.
+func ForceRefreshOAuthToken(ctx context.Context, providerID uint) (access, accountID string, err error) {
+	return ensureOAuthToken(ctx, providerID, true)
+}
+
+func ensureOAuthToken(ctx context.Context, providerID uint, force bool) (access, accountID string, err error) {
 	mu := providerOAuthLock(providerID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -77,7 +88,7 @@ func EnsureFreshOAuthToken(ctx context.Context, providerID uint) (access, accoun
 	// Re-read inside the lock for the freshest expires_at; another goroutine
 	// holding the same lock may have just refreshed.
 	now := time.Now().UnixMilli()
-	if p.OAuthExpiresAt-now > codexRefreshSkew.Milliseconds() && p.OAuthAccessToken != "" {
+	if !force && p.OAuthExpiresAt-now > codexRefreshSkew.Milliseconds() && p.OAuthAccessToken != "" {
 		access, dErr := utils.Decrypt(p.OAuthAccessToken)
 		if dErr != nil {
 			// fall through to refresh on decrypt failure

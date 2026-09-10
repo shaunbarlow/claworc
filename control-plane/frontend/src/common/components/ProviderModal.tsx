@@ -2,7 +2,7 @@ import { createElement, useState, useEffect } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import ProviderIcon from "@common/components/ProviderIcon";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCreateProvider, useUpdateProvider, useDeleteProvider, useCatalogProviders, useCatalogProviderDetail, useCatalogIconMap } from "@common/hooks/useProviders";
+import { useCreateProvider, useUpdateProvider, useDeleteProvider, useRefreshProviderOAuth, useCatalogProviders, useCatalogProviderDetail, useCatalogIconMap } from "@common/hooks/useProviders";
 import { syncAllProviders, testProviderKey } from "@common/api/llm";
 import {
   buildCodexAuthorizeURL,
@@ -805,6 +805,7 @@ export default function ProviderModal({
 function CodexOAuthPanel({ provider, onChanged }: { provider: LLMProvider; onChanged: () => void }) {
   const queryClient = useQueryClient();
   const updateProviderMutation = useUpdateProvider();
+  const refreshProviderMutation = useRefreshProviderOAuth();
   const [verifier, setVerifier] = useState<string | null>(null);
   const [stateValue, setStateValue] = useState<string | null>(null);
   const [redirectInput, setRedirectInput] = useState("");
@@ -821,6 +822,20 @@ function CodexOAuthPanel({ provider, onChanged }: { provider: LLMProvider; onCha
       setStateValue(s);
     } catch (err) {
       errorToast("Failed to start ChatGPT login", err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setBusy(true);
+    try {
+      const updated = await refreshProviderMutation.mutateAsync(provider.id);
+      successToast("ChatGPT token refreshed", updated.oauth_email);
+      await queryClient.invalidateQueries({ queryKey: ["llm-providers"] });
+      onChanged();
+    } catch (err) {
+      errorToast("ChatGPT token refresh failed", err);
     } finally {
       setBusy(false);
     }
@@ -858,24 +873,26 @@ function CodexOAuthPanel({ provider, onChanged }: { provider: LLMProvider; onCha
     }
   };
 
-  if (provider.oauth_connected) {
+  if (provider.oauth_connected && !verifier) {
     const expiresIn = provider.oauth_expires_at
       ? Math.max(0, Math.round((provider.oauth_expires_at - Date.now()) / 60000))
       : null;
     return (
-      <div className="border border-emerald-200 bg-emerald-50 rounded-md p-3">
+      <div className="border border-emerald-200 bg-emerald-50 rounded-md p-3 space-y-3">
         <div className="text-xs">
           <div className="text-emerald-700 font-medium">✓ ChatGPT account connected</div>
           {provider.oauth_email && (
-            <div className="text-gray-600 mt-1">
-              <span className="text-gray-500">Account:</span> <span className="font-mono">{provider.oauth_email}</span>
-            </div>
+            <div className="text-gray-600 mt-1"><span className="text-gray-500">Account:</span> <span className="font-mono">{provider.oauth_email}</span></div>
           )}
-          {expiresIn !== null && (
-            <div className="text-gray-500 mt-0.5">
-              Access token expires in {expiresIn} min (auto-refreshed)
-            </div>
-          )}
+          {expiresIn !== null && <div className="text-gray-500 mt-0.5">Access token expires in {expiresIn} min (auto-refreshed)</div>}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" onClick={handleRefresh} disabled={busy} className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50">
+            {busy ? "Refreshing..." : "Refresh token now"}
+          </button>
+          <button type="button" onClick={handleConnect} disabled={busy} className="px-3 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">
+            Re-authenticate
+          </button>
         </div>
       </div>
     );

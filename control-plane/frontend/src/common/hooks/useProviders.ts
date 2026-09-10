@@ -3,6 +3,7 @@ import {
   fetchProviders,
   createProvider,
   updateProvider,
+  refreshProviderOAuth,
   deleteProvider,
   fetchCatalogProviders,
   fetchCatalogProviderDetail,
@@ -42,6 +43,10 @@ export function useUpdateProvider() {
       };
     }) => updateProvider(id, payload),
   });
+}
+
+export function useRefreshProviderOAuth() {
+  return useMutation({ mutationFn: refreshProviderOAuth });
 }
 
 export function useCatalogProviders() {

@@ -771,6 +771,35 @@ func UpdateProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toProviderResp(p))
 }
 
+// RefreshProviderOAuth forces an immediate refresh of a connected Codex
+// provider's access token, bypassing the normal expiry-window check.
+func RefreshProviderOAuth(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid provider ID")
+		return
+	}
+	var p database.LLMProvider
+	if err := database.DB.First(&p, id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "Provider not found")
+		return
+	}
+	if p.InstanceID != nil && !middleware.CanAccessInstance(r, *p.InstanceID) {
+		writeError(w, http.StatusForbidden, "Access denied")
+		return
+	}
+	if !llmgateway.IsOAuthAPIType(p.APIType) {
+		writeError(w, http.StatusBadRequest, "Provider does not use OAuth")
+		return
+	}
+	if _, _, err := llmgateway.ForceRefreshOAuthToken(r.Context(), uint(id)); err != nil {
+		writeError(w, http.StatusBadGateway, "ChatGPT token refresh failed: "+err.Error())
+		return
+	}
+	database.DB.First(&p, id)
+	writeJSON(w, http.StatusOK, toProviderResp(p))
+}
+
 func pushProviderUpdateToInstances(providerID uint) {
 	orch := orchestrator.Get()
 	if orch == nil {

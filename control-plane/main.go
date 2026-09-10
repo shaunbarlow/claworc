@@ -575,6 +575,7 @@ func main() {
 				r.Get("/llm/providers", handlers.ListProviders)
 				r.Post("/llm/providers", handlers.CreateProvider)
 				r.Put("/llm/providers/{id}", handlers.UpdateProvider)
+				r.Post("/llm/providers/{id}/oauth/refresh", handlers.RefreshProviderOAuth)
 				r.Delete("/llm/providers/{id}", handlers.DeleteProvider)
 				r.Post("/llm/providers/{id}/sync", handlers.SyncProviderModels)
 				r.Get("/llm/usage", handlers.GetUsageLogs)
