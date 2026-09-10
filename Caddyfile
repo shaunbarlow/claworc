@@ -1,3 +1,7 @@
+{
+	import /etc/caddy/sites/*.caddy
+}
+
 {$CLAWORC_DOMAIN} {
 	reverse_proxy control-plane:8000
 }

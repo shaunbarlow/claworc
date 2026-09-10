@@ -37,6 +37,9 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Drop one *.caddy file per additional hostname in ./caddy/sites.
+      # Caddy imports them automatically from the root Caddyfile.
+      - ./caddy/sites:/etc/caddy/sites:ro
       - caddy-data:/data
       - caddy-config:/config
     environment:
