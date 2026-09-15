@@ -89,17 +89,20 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
       "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
     ]);
     expect(script.exitCode).toBe(0);
-    for (const plugin of [
+    const managedPlugins = [
       "@openclaw/slack",
       "@openclaw/discord",
       "@openclaw/brave-plugin",
       "@martian-engineering/lossless-claw",
-    ]) {
+    ];
+    for (const plugin of managedPlugins) {
       expect(script.stdout).toContain(
         `plugins install ${plugin}`,
       );
     }
-    expect(script.stdout.match(/--accept-capabilities --force/g)).toHaveLength(2);
+    expect(script.stdout.match(/--accept-capabilities --force/g)).toHaveLength(
+      managedPlugins.length,
+    );
   });
 
   // chrome-data must be created by the desktop service (only when Chrome runs),
