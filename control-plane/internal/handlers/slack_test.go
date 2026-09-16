@@ -129,6 +129,43 @@ func TestRenderSlackChannelsJSON(t *testing.T) {
 	}
 }
 
+func TestRenderSlackChannelsJSONReplyPlacement(t *testing.T) {
+	cfg := instanceSlackConfig{
+		Enabled:     true,
+		ReplyToMode: "all",
+		Channels: []slackChannelEntry{
+			{ID: "C0123456789", ReplyToMode: "off"},
+		},
+	}
+	rendered, err := renderSlackChannelsJSON(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var block map[string]interface{}
+	if err := json.Unmarshal([]byte(rendered), &block); err != nil {
+		t.Fatalf("rendered config is not valid JSON: %v", err)
+	}
+	if block["replyToMode"] != "all" {
+		t.Errorf("expected Slack-wide replyToMode all, got %v", block["replyToMode"])
+	}
+	channels := block["channels"].(map[string]interface{})
+	channel := channels["C0123456789"].(map[string]interface{})
+	if channel["replyToMode"] != "off" {
+		t.Errorf("expected per-channel replyToMode off, got %v", channel["replyToMode"])
+	}
+}
+
+func TestValidateSlackReplyToMode(t *testing.T) {
+	for _, good := range []string{"", "off", "first", "all", "batched"} {
+		if err := validateSlackReplyToMode(good); err != nil {
+			t.Errorf("reply_to_mode %q: unexpected error: %v", good, err)
+		}
+	}
+	if err := validateSlackReplyToMode("thread"); err == nil {
+		t.Error("expected invalid reply_to_mode to be rejected")
+	}
+}
+
 func TestRenderSlackChannelsJSONDisabled(t *testing.T) {
 	rendered, err := renderSlackChannelsJSON(instanceSlackConfig{
 		Enabled:  false,

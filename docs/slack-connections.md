@@ -1,8 +1,8 @@
 # Per-Agent Slack Connections
 
 Claworc can connect each agent (OpenClaw instance) to a Slack workspace with a
-structured per-agent config: bot/app tokens plus a channel allowlist and DM
-policy. It is a thin layer over OpenClaw's native Slack channel plugin — Claworc
+structured per-agent config: bot/app tokens plus a channel allowlist, reply placement,
+and DM policy. It is a thin layer over OpenClaw's native Slack channel plugin — Claworc
 stores the settings, delivers them to the instance, and OpenClaw does the rest.
 
 ## Prerequisites (Slack side)
@@ -39,8 +39,9 @@ The stored structure is rendered into an OpenClaw `channels.slack` block, e.g.:
 {
   "enabled": true,
   "groupPolicy": "allowlist",
+  "replyToMode": "all",
   "channels": {
-    "C0123456789": { "enabled": true, "requireMention": true }
+    "C0123456789": { "enabled": true, "requireMention": true, "replyToMode": "all" }
   },
   "dmPolicy": "pairing"
 }
@@ -100,6 +101,23 @@ uppercased, duplicates dropped). Names are rejected up front because OpenClaw
 routes by ID under `groupPolicy: "allowlist"` and name keys silently fail to
 match.
 
+## Channel reply placement
+
+The Slack card exposes OpenClaw's `replyToMode` controls for automatic replies
+to top-level channel messages. Valid values are `off`, `first`, `all`, and
+`batched`; leaving the setting empty preserves OpenClaw's default (`off`). A
+per-channel selection overrides the Slack-wide selection for that channel.
+
+- `off` — post automatic replies as top-level channel messages.
+- `first` — thread the first applicable response.
+- `all` — thread all applicable responses (the usual choice for keeping a
+  channel tidy).
+- `batched` — thread a batched response.
+
+Slack Agent View and Assistant View DMs are managed by Slack and remain
+threaded regardless of this setting. This setting also does not flatten an
+existing inbound Slack thread; it controls automatic reply placement.
+
 ## DM policy
 
 `dm_policy` maps onto OpenClaw's `channels.slack.dmPolicy`:
@@ -153,9 +171,10 @@ automatically whenever `allowBots` lets bot messages through.
 ## UI
 
 - **Agent → Settings → Slack** card (next to Webhook): enable toggle, masked
-  token inputs (leave blank to keep; remove via the Environment Variables
-  card), channel list with per-channel "require @-mention", DM policy select,
-  bot-authored-message select.
+  token inputs (leave blank to keep; remove via the Environment Variables card),
+  Slack-wide reply placement, channel list with per-channel "require
+  @-mention" and reply-placement override, DM policy select, bot-authored-message
+  select.
 - **Create Agent form**: an optional Slack card with the same fields.
 
 ## Scope / deferred

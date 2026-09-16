@@ -5,6 +5,8 @@ export interface SlackChannel {
   id: string;
   /** Undefined means OpenClaw's default (true): respond only when @-mentioned. */
   require_mention?: boolean;
+  /** Empty inherits the Slack default; otherwise off, first, all, or batched. */
+  reply_to_mode?: string;
 }
 
 /** GET /instances/{id}/slack response. */
@@ -12,6 +14,8 @@ export interface InstanceSlack {
   configured: boolean;
   enabled: boolean;
   channels: SlackChannel[];
+  /** Empty preserves OpenClaw's default (off); otherwise off, first, all, or batched. */
+  reply_to_mode: string;
   dm_policy: string;
   /** Slack member IDs allowed to DM the agent under the "allowlist" policy. */
   dm_allow_from: string[];
@@ -32,6 +36,7 @@ export interface InstanceSlack {
 export interface InstanceSlackUpdatePayload {
   enabled?: boolean;
   channels?: SlackChannel[];
+  reply_to_mode?: string;
   dm_policy?: string;
   dm_allow_from?: string[];
   allow_bots?: string;
@@ -44,6 +49,7 @@ export interface InstanceSlackUpdatePayload {
 export interface SlackCreateConfig {
   enabled: boolean;
   channels?: SlackChannel[];
+  reply_to_mode?: string;
   dm_policy?: string;
   dm_allow_from?: string[];
   allow_bots?: string;

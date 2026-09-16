@@ -65,6 +65,19 @@ export default function SlackChannelsEditor({ channels, onChange, disabled }: Pr
                 />
                 Require @-mention
               </label>
+              <select
+                value={ch.reply_to_mode ?? ""}
+                disabled={disabled}
+                onChange={(e) => patch(idx, { reply_to_mode: e.target.value || undefined })}
+                title="Override the Slack-wide reply placement for this channel"
+                className="max-w-32 px-2 py-1.5 border border-gray-300 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">Reply: default</option>
+                <option value="off">Reply: top-level</option>
+                <option value="first">Reply: first thread</option>
+                <option value="all">Reply: thread</option>
+                <option value="batched">Reply: batched thread</option>
+              </select>
               <button
                 type="button"
                 title="Remove channel"

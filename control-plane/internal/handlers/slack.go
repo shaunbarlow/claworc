@@ -56,12 +56,19 @@ type slackChannelEntry struct {
 	// RequireMention nil means OpenClaw's default (true): the bot only
 	// responds when @-mentioned in the channel.
 	RequireMention *bool `json:"require_mention,omitempty"`
+	// ReplyToMode overrides the Slack-wide reply placement for this channel.
+	// Empty inherits ReplyToMode (or OpenClaw's default of "off").
+	ReplyToMode string `json:"reply_to_mode,omitempty"`
 }
 
 // instanceSlackConfig is the JSON shape persisted in Instance.SlackConfig.
 type instanceSlackConfig struct {
 	Enabled  bool                `json:"enabled"`
 	Channels []slackChannelEntry `json:"channels"`
+	// ReplyToMode controls where automatic replies to top-level Slack messages
+	// land: "off", "first", "all", or "batched". Per-channel settings may
+	// override it. Empty preserves OpenClaw's default ("off").
+	ReplyToMode string `json:"reply_to_mode,omitempty"`
 	// DMPolicy: "" (OpenClaw default, pairing), "pairing", "allowlist",
 	// "open", "disabled".
 	DMPolicy string `json:"dm_policy,omitempty"`
@@ -103,6 +110,9 @@ func validateSlackConfig(cfg *instanceSlackConfig) error {
 		if seen[id] {
 			continue
 		}
+		if err := validateSlackReplyToMode(ch.ReplyToMode); err != nil {
+			return fmt.Errorf("invalid reply_to_mode for Slack channel %q: %w", ch.ID, err)
+		}
 		seen[id] = true
 		ch.ID = id
 		normalized = append(normalized, ch)
@@ -131,6 +141,9 @@ func validateSlackConfig(cfg *instanceSlackConfig) error {
 		allowFrom = append(allowFrom, uid)
 	}
 	cfg.DMAllowFrom = allowFrom
+	if err := validateSlackReplyToMode(cfg.ReplyToMode); err != nil {
+		return fmt.Errorf("invalid Slack reply_to_mode: %w", err)
+	}
 
 	switch cfg.DMPolicy {
 	case "", "pairing", "open", "disabled":
@@ -153,6 +166,15 @@ func validateSlackConfig(cfg *instanceSlackConfig) error {
 	return nil
 }
 
+func validateSlackReplyToMode(mode string) error {
+	switch mode {
+	case "", "off", "first", "all", "batched":
+		return nil
+	default:
+		return fmt.Errorf("must be one of off, first, all, batched")
+	}
+}
+
 // renderSlackChannelsJSON renders the stored config into the OpenClaw
 // `channels.slack` block. Tokens are deliberately omitted — OpenClaw falls
 // back to SLACK_BOT_TOKEN/SLACK_APP_TOKEN from the environment for the
@@ -161,6 +183,9 @@ func renderSlackChannelsJSON(cfg instanceSlackConfig) (string, error) {
 	block := map[string]interface{}{"enabled": cfg.Enabled}
 	if cfg.Enabled {
 		block["groupPolicy"] = "allowlist"
+		if cfg.ReplyToMode != "" {
+			block["replyToMode"] = cfg.ReplyToMode
+		}
 		// AllowBots: OpenClaw's own default is false when the key is unset, so
 		// only write it for the non-default choice.
 		if cfg.AllowBots == "true" {
@@ -169,10 +194,14 @@ func renderSlackChannelsJSON(cfg instanceSlackConfig) (string, error) {
 		if len(cfg.Channels) > 0 {
 			channels := make(map[string]interface{}, len(cfg.Channels))
 			for _, ch := range cfg.Channels {
-				channels[ch.ID] = map[string]interface{}{
+				channel := map[string]interface{}{
 					"enabled":        true,
 					"requireMention": ch.RequireMention == nil || *ch.RequireMention,
 				}
+				if ch.ReplyToMode != "" {
+					channel["replyToMode"] = ch.ReplyToMode
+				}
+				channels[ch.ID] = channel
 			}
 			block["channels"] = channels
 		}
@@ -273,6 +302,7 @@ type instanceSlackResponse struct {
 	Configured     bool                `json:"configured"`
 	Enabled        bool                `json:"enabled"`
 	Channels       []slackChannelEntry `json:"channels"`
+	ReplyToMode    string              `json:"reply_to_mode"`
 	DMPolicy       string              `json:"dm_policy"`
 	DMAllowFrom    []string            `json:"dm_allow_from"`
 	AllowBots      string              `json:"allow_bots"`
@@ -291,6 +321,7 @@ func slackResponseFor(inst database.Instance) instanceSlackResponse {
 		Configured:  configured,
 		Enabled:     cfg.Enabled,
 		Channels:    cfg.Channels,
+		ReplyToMode: cfg.ReplyToMode,
 		DMPolicy:    cfg.DMPolicy,
 		DMAllowFrom: cfg.DMAllowFrom,
 		AllowBots:   cfg.AllowBots,
@@ -358,6 +389,7 @@ func GetInstanceSlack(w http.ResponseWriter, r *http.Request) {
 type instanceSlackUpdateRequest struct {
 	Enabled     *bool                `json:"enabled"`
 	Channels    *[]slackChannelEntry `json:"channels"`
+	ReplyToMode *string              `json:"reply_to_mode"`
 	DMPolicy    *string              `json:"dm_policy"`
 	DMAllowFrom *[]string            `json:"dm_allow_from"`
 	AllowBots   *string              `json:"allow_bots"`
@@ -391,6 +423,9 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Channels != nil {
 		cfg.Channels = *body.Channels
+	}
+	if body.ReplyToMode != nil {
+		cfg.ReplyToMode = *body.ReplyToMode
 	}
 	if body.DMPolicy != nil {
 		cfg.DMPolicy = *body.DMPolicy

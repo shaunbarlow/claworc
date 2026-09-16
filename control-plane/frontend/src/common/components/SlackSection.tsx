@@ -23,6 +23,7 @@ export default function SlackSection({ instanceId }: Props) {
 
   const [enabled, setEnabled] = useState(false);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
+  const [replyToMode, setReplyToMode] = useState("");
   const [dmPolicy, setDmPolicy] = useState("");
   const [dmAllowFrom, setDmAllowFrom] = useState<string[]>([]);
   const [allowBots, setAllowBots] = useState("");
@@ -34,6 +35,7 @@ export default function SlackSection({ instanceId }: Props) {
     if (!data || dirty) return;
     setEnabled(data.enabled);
     setChannels(data.channels);
+    setReplyToMode(data.reply_to_mode ?? "");
     setDmPolicy(data.dm_policy ?? "");
     setDmAllowFrom(data.dm_allow_from ?? []);
     setAllowBots(data.allow_bots ?? "");
@@ -45,6 +47,7 @@ export default function SlackSection({ instanceId }: Props) {
     const payload: InstanceSlackUpdatePayload = {
       enabled,
       channels: channels.filter((c) => c.id.trim() !== ""),
+      reply_to_mode: replyToMode,
       dm_policy: dmPolicy,
       dm_allow_from: dmAllowFrom.filter((u) => u.trim() !== ""),
       allow_bots: allowBots,
@@ -157,6 +160,15 @@ export default function SlackSection({ instanceId }: Props) {
           }}
         />
 
+        <SlackReplyToModeSelect
+          value={replyToMode}
+          disabled={!enabled}
+          onChange={(v) => {
+            setReplyToMode(v);
+            markDirty();
+          }}
+        />
+
         <SlackDMPolicySelect
           value={dmPolicy}
           disabled={!enabled}
@@ -194,6 +206,37 @@ export default function SlackSection({ instanceId }: Props) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SlackReplyToModeSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-700 mb-1">Channel reply placement</label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+      >
+        <option value="">Top-level messages (OpenClaw default: off)</option>
+        <option value="off">Always reply as top-level messages</option>
+        <option value="first">Thread the first applicable response</option>
+        <option value="all">Thread all applicable responses</option>
+        <option value="batched">Thread a batched response</option>
+      </select>
+      <p className="text-[11px] text-gray-500 mt-0.5">
+        Applies to channel messages unless a channel has its own override. Slack Agent View and Assistant View DMs remain Slack-managed threads.
+      </p>
     </div>
   );
 }
