@@ -58,14 +58,14 @@ and delivered two ways:
    from the DB. When the env var is absent (Slack never configured through
    Claworc), the script leaves `channels.slack` alone, so manual edits via the
    Config tab keep working.
-2. **On edit while running** — `PUT /api/v1/instances/{id}/slack` pushes the
-   same single replacing set over SSH and restarts the gateway
-   (`applySlackConfig` in `internal/handlers/slack.go`), so channel/DM changes
-   apply without a container restart. A *token* change instead triggers the
-   standard env-vars container restart, which re-applies everything via (1).
-   That restart is not decided by "did the row change" — it is decided by
-   `EnsureEnvPropagated`, which compares the live container's environment
-   against what the database says it should be. See `docs/env-propagation.md`.
+2. **On edit while running** — `PUT /api/v1/instances/{id}/slack` persists
+   the new database state, then uses `EnsureEnvPropagated` to rebuild the
+   running container when its generated `OPENCLAW_INITIAL_SLACK` value differs.
+   The gateway starts from that refreshed payload; Claworc no longer applies a
+   competing SSH-only `channels.slack` write. This makes the database the sole
+   source of truth and prevents a later container restart from replaying an
+   older configuration. The response contains `restarting: true` when that
+   reconciliation restart was queued.
 
 A plain `config set` already replaces `channels.slack` wholesale, so channels
 removed in Claworc are dropped; `--replace` is passed for consistency with the
@@ -85,7 +85,8 @@ edits under it.
   merged global+instance env vars) and masked token previews.
 - `PUT /api/v1/instances/{id}/slack` — partial update: omitted fields keep
   their value; tokens use omit=keep, `""`=remove, value=set. Responds with the
-  new state plus `restarting: true` when a token change kicked off a restart.
+  new state plus `restarting: true` when a managed Slack setting required a
+  container reconciliation restart.
 - Create: `POST /api/v1/instances` accepts a `slack` object
   (`{enabled, channels, dm_policy, bot_token, app_token}`) so a new agent
   connects to Slack on first boot.
@@ -163,10 +164,10 @@ loops):
 | `"true"` | Bot messages are treated the same as human messages. |
 
 Unlike Discord, OpenClaw's Slack channel has no `"mentions"` variant — it is a
-plain boolean. This is a config-only change (like channels/DM policy) — no
-token involved, so it is pushed live over SSH with a gateway restart rather
-than a container restart. OpenClaw applies its own bot-loop protection
-automatically whenever `allowBots` lets bot messages through.
+plain boolean. Like every Claworc-managed Slack setting, this change triggers a
+container reconciliation restart so the boot payload and runtime config remain
+the same revision. OpenClaw applies its own bot-loop protection automatically
+whenever `allowBots` lets bot messages through.
 
 ## UI
 

@@ -83,7 +83,7 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     expect(script.stdout).not.toContain("tail -f /dev/null");
   });
 
-  it("boot reconciles channel plugin capabilities", () => {
+  it("boot installs only missing channel plugins", () => {
     const script = exec(container!, [
       "cat",
       "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
@@ -96,13 +96,11 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
       "@martian-engineering/lossless-claw",
     ];
     for (const plugin of managedPlugins) {
-      expect(script.stdout).toContain(
-        `plugins install ${plugin}`,
-      );
+      expect(script.stdout).toContain(`ensure_plugin ${plugin}`);
     }
-    expect(script.stdout.match(/--accept-capabilities --force/g)).toHaveLength(
-      managedPlugins.length,
-    );
+    expect(script.stdout).toContain("openclaw plugins list --json");
+    expect(script.stdout).toContain("plugins install \"$package\" --accept-capabilities");
+    expect(script.stdout).not.toContain("--accept-capabilities --force");
   });
 
   // chrome-data must be created by the desktop service (only when Chrome runs),

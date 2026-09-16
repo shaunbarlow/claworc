@@ -255,7 +255,8 @@ func renderInitialDiscordEnv(inst database.Instance) string {
 // OpenClaw config over an established SSH connection and restarts the gateway
 // so it takes effect.
 //
-// One atomic write, same as applySlackConfig. `config set` replaces this path
+// One atomic write, same replace semantics as Claworc's boot-time Slack
+// reconciliation. `config set` replaces this path wholesale
 // wholesale, so guilds/channels removed in Claworc disappear on their own;
 // clearing the path first only adds a write that OpenClaw's size-drop guard
 // rejects, and that strands the agent with no Discord config whenever it does
@@ -276,8 +277,8 @@ func applyDiscordConfig(ctx context.Context, agent sshproxy.Instance, name, chan
 }
 
 // pushDiscordConfig is the async best-effort wrapper around
-// applyDiscordConfig for a running instance (mirrors pushSlackConfig). A
-// stopped or unreachable instance picks the config up at next boot via
+// applyDiscordConfig for a running instance. Slack config uses a container
+// desired-state reconciliation instead. A stopped or unreachable instance picks the config up at next boot via
 // OPENCLAW_INITIAL_DISCORD.
 func pushDiscordConfig(instanceID uint, name, channelsJSON string) {
 	if SSHMgr == nil || channelsJSON == "" {

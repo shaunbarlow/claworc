@@ -372,8 +372,7 @@ func resolvePluginID(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // runPluginConfigAction runs a fast (non-install) openclaw subcommand against
 // the instance over SSH, then restarts the gateway so the change takes
-// effect, mirroring applyDiscordConfig/applySlackConfig's config-set+restart
-// pattern.
+// effect, mirroring the Discord config-set+restart pattern.
 func runPluginConfigAction(instanceID uint, args ...string) pluginActionResult {
 	if SSHMgr == nil {
 		return pluginActionResult{Error: "SSH is not configured on the control plane"}

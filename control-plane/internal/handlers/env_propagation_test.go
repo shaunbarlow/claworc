@@ -96,17 +96,17 @@ func TestInstanceEnvDrift_RemovalStillLiveInContainer(t *testing.T) {
 	}
 }
 
-// OPENCLAW_INITIAL_* is reconciled live over SSH and rewritten at every boot,
-// so a stale copy in the container is not worth a restart. Without this,
-// editing a Discord channel list -- which changes OPENCLAW_INITIAL_DISCORD --
-// would bounce the container instead of taking effect live.
-func TestInstanceEnvDrift_InitialConfigVarsAreExempt(t *testing.T) {
+// A managed bootstrap value is not a harmless seed: the service uses it to
+// replace the corresponding OpenClaw config block at every boot. If it differs
+// from the DB-rendered value, a later restart would undo a successful live
+// config push, so it must count as drift and trigger a pod-spec refresh.
+func TestInstanceEnvDrift_InitialConfigVarsRequireReconciliation(t *testing.T) {
 	setupTestDB(t)
 	inst, live := envFor(t, map[string]string{})
 	inst.DiscordConfig = `{"enabled":true,"channels":[]}`
 	live["OPENCLAW_INITIAL_DISCORD"] = `{"enabled":false}`
 
-	if driftAgainst(t, inst, live, "OPENCLAW_INITIAL_DISCORD") {
-		t.Error("OPENCLAW_INITIAL_* has a live push path and must not force a restart")
+	if !driftAgainst(t, inst, live, "OPENCLAW_INITIAL_DISCORD") {
+		t.Error("a stale OPENCLAW_INITIAL_* config must force reconciliation")
 	}
 }

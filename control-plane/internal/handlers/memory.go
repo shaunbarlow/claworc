@@ -306,8 +306,8 @@ func buildMemoryConfig(inst *database.Instance) map[string]interface{} {
 // config-reload planner, so it falls through to the default "restart"
 // classification).
 //
-// One atomic write, same as applySlackConfig/applyDiscordConfig. `config set`
-// replaces this subtree wholesale, so removed folders and cleared overrides
+// One atomic write, same replace semantics as the channel config reconcilers.
+// `config set` replaces this subtree wholesale, so removed folders and cleared overrides
 // disappear without an `unset` first — and unsetting is the worse option: it
 // is a separate write that OpenClaw's size-drop guard rejects on a realistic
 // config, and when it does land ahead of a failing set the agent loses its

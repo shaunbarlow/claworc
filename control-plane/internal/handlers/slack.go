@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,11 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gluk-w/claworc/control-plane/internal/database"
 	"github.com/gluk-w/claworc/control-plane/internal/middleware"
-	"github.com/gluk-w/claworc/control-plane/internal/sshproxy"
 	"github.com/gluk-w/claworc/control-plane/internal/utils"
 	"github.com/go-chi/chi/v5"
 )
@@ -25,9 +22,9 @@ import (
 //
 // That env fallback only applies while the Slack plugin's channel surface is
 // accepted; an unaccepted plugin loses the channel and OpenClaw then suppresses
-// it as "ambient-only". The agent boot script installs the plugin with
-// --accept-capabilities on every boot, and records why a botToken SecretRef is
-// deliberately not used here.
+// it as "ambient-only". The agent boot script installs a missing plugin with
+// --accept-capabilities before the gateway starts, and records why a botToken
+// SecretRef is deliberately not used here.
 const (
 	slackBotTokenEnvVar = "SLACK_BOT_TOKEN"
 	slackAppTokenEnvVar = "SLACK_APP_TOKEN"
@@ -243,52 +240,6 @@ func renderInitialSlackEnv(inst database.Instance) string {
 	return rendered
 }
 
-// applySlackConfig writes the channels.slack block into the agent's OpenClaw
-// config over an established SSH connection and restarts the gateway so it
-// takes effect.
-//
-// One atomic write. `config set` replaces this path wholesale, so channels
-// removed in Claworc disappear without clearing the path first — and clearing
-// it first is actively harmful: `config unset channels.slack` is a separate
-// write that OpenClaw's size-drop guard rejects on a realistic config
-// ("Config write rejected … (size-drop:…)"), and on a config large enough for
-// it to land, a failing set would leave the agent with no Slack config at all.
-// `--replace` is explicit about the intent and keeps the write from being
-// refused should OpenClaw ever treat this as a protected map path.
-func applySlackConfig(ctx context.Context, agent sshproxy.Instance, name, channelsJSON string) {
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", "channels.slack", channelsJSON, "--replace", "--json")
-	if err != nil {
-		log.Printf("Error setting channels.slack for %s: %v", utils.SanitizeForLog(name), err)
-		return
-	}
-	if code != 0 {
-		log.Printf("Failed to set channels.slack for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
-		return
-	}
-	if _, _, _, err := agent.ExecOpenclaw(ctx, "gateway", "stop", "--force"); err != nil {
-		log.Printf("Error restarting gateway for %s after Slack config change: %v", utils.SanitizeForLog(name), err)
-	}
-}
-
-// pushSlackConfig is the async best-effort wrapper around applySlackConfig
-// for a running instance (mirrors pushBrowserEnabledConfig). A stopped or
-// unreachable instance picks the config up at next boot via
-// OPENCLAW_INITIAL_SLACK.
-func pushSlackConfig(instanceID uint, name, channelsJSON string) {
-	if SSHMgr == nil || channelsJSON == "" {
-		return
-	}
-	go func() {
-		ctx := context.Background()
-		sshClient, err := SSHMgr.WaitForSSH(ctx, instanceID, 30*time.Second)
-		if err != nil {
-			log.Printf("slack-config: no SSH connection for instance %d, skipping OpenClaw config push: %v", instanceID, err)
-			return
-		}
-		applySlackConfig(ctx, sshproxy.NewSSHInstance(sshClient), name, channelsJSON)
-	}()
-}
-
 // instanceSlackCreateRequest is the create-time Slack payload (structured
 // config plus tokens) accepted by CreateInstance, so a new agent connects to
 // Slack on first boot.
@@ -401,10 +352,9 @@ type instanceSlackUpdateRequest struct {
 // PUT /api/v1/instances/{id}/slack
 //
 // Persists the structured Slack config and token env vars, then propagates:
-// a token change restarts the container (env vars are injected at create
-// time; the boot script re-applies channels.slack from OPENCLAW_INITIAL_SLACK),
-// while a config-only change is pushed live over SSH with just a gateway
-// restart.
+// a token or config change rebuilds the container spec. This keeps the
+// OPENCLAW_INITIAL_SLACK bootstrap payload in lockstep with the DB state, so a
+// later gateway restart cannot replay an older Slack configuration.
 func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 	inst, ok := resolveInstanceForChannelSettings(w, r)
 	if !ok {
@@ -493,23 +443,23 @@ func UpdateInstanceSlack(w http.ResponseWriter, r *http.Request) {
 
 	resp := slackResponseFor(*inst)
 
-	// Propagate to the running container -- same contract as Discord above:
-	// EnsureEnvPropagated diffs the live container env rather than trusting
-	// envVarsChanged, so a token saved while the agent was still provisioning
-	// is recovered on the next save instead of needing a manual restart.
-	// Same as Discord: the Slack plugin ships separately from OpenClaw now, so
+	// Propagate the complete database-derived container spec. In particular,
+	// OPENCLAW_INITIAL_SLACK is authoritative at boot, so it must be refreshed
+	// with the same revision as a live Slack config change. A gateway-only SSH
+	// push would leave an old bootstrap payload behind to undo the change on the
+	// next container restart.
+	//
+	// EnsureEnvPropagated compares the actual pod env with buildCreateParams,
+	// making this idempotent and ensuring a missed earlier restart is recovered
+	// by the next save.
 	// enabling the channel installs it on the agent if it is absent.
 	if cfg.Enabled {
 		EnsureChannelPluginInstalled(inst.ID, inst.Name, "slack")
 	}
 
 	if envVarsChanged || configChanged {
-		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), slackBotTokenEnvVar, slackAppTokenEnvVar) {
+		if EnsureEnvPropagated(r.Context(), *inst, callerID(r), slackBotTokenEnvVar, slackAppTokenEnvVar, "OPENCLAW_INITIAL_SLACK") {
 			resp.Restarting = true
-		} else if configChanged {
-			if rendered := renderInitialSlackEnv(*inst); rendered != "" {
-				pushSlackConfig(inst.ID, inst.Name, rendered)
-			}
 		}
 	}
 

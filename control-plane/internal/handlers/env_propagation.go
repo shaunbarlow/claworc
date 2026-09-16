@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/gluk-w/claworc/control-plane/internal/database"
@@ -30,18 +29,17 @@ import (
 // decision is made against live state rather than an event, it is idempotent,
 // safe to call from any path, and self-healing on the next call.
 
-// envDriftExempt reports whether an env var may legitimately differ between
-// the desired spec and a running container.
+// Every environment variable emitted by buildCreateParams is part of the
+// instance's desired state. In particular, OPENCLAW_INITIAL_* carries the
+// boot-time configuration that the service applies with `config set --replace`.
+// Treating those values as exempt lets a live SSH push and a later restart use
+// different revisions of the same configuration, so a stale bootstrap value
+// can undo an already-successful live update.
 //
-// OPENCLAW_INITIAL_* only seeds the agent's OpenClaw config at boot, and every
-// one of them has a live push path over SSH (pushSlackConfig,
-// pushDiscordConfig, ConfigureInstance). A stale value in a running container
-// is therefore not worth a restart: the agent's config is already correct, and
-// the var is rewritten at the next boot anyway. Counting these as drift would
-// turn every channel-config edit into a container restart.
-func envDriftExempt(name string) bool {
-	return strings.HasPrefix(name, "OPENCLAW_INITIAL_")
-}
+// Environment changes require a rebuilt container spec; no running process can
+// receive a new environment. Therefore there are deliberately no exemptions
+// here: a difference means the instance must be restarted to converge its
+// boot-time and runtime configuration on the same database-derived state.
 
 // envPropagationTimeout bounds the orchestrator round-trips made while
 // answering an HTTP request. A slow or unreachable backend must not hold the
@@ -66,17 +64,11 @@ func instanceEnvDrift(ctx context.Context, orch orchestrator.ContainerOrchestrat
 	desired := buildCreateParams(inst).EnvVars
 
 	for name, want := range desired {
-		if envDriftExempt(name) {
-			continue
-		}
 		if got, ok := actual[name]; !ok || got != want {
 			return true, nil
 		}
 	}
 	for _, name := range touched {
-		if envDriftExempt(name) {
-			continue
-		}
 		if _, stillDesired := desired[name]; stillDesired {
 			continue // already covered by the loop above
 		}

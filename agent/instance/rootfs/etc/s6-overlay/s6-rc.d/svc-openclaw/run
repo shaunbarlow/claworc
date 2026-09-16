@@ -15,32 +15,46 @@ export OPENCLAW_SERVICE_REPAIR_POLICY=external
 
 # Slack and Discord are separate npm plugins rather than dependencies of the
 # openclaw package. For a channel configured through Claworc, install its
-# plugin on every boot so a fresh image, an existing PVC, and a plugin upgrade
-# all converge to the same runnable state. `--force` makes the operation safe
-# when the package is already present, while `--accept-capabilities` re-grants
-# the package surface for its current hash. These are deliberately best-effort:
-# an already-installed plugin remains usable when the registry is temporarily
-# unavailable, and the gateway should still start so the external supervisor
-# can keep the instance reachable.
+# Managed plugins persist on the instance volume. Snapshot the registry once,
+# then install only packages that are absent. This avoids four npm registry
+# operations on every gateway restart while retaining a best-effort first-boot
+# recovery path for fresh volumes and missing plugins.
+installed_plugins="$(s6-setuidgid claworc openclaw plugins list --json 2>/dev/null || printf '{\"plugins\":[]}')"
+plugin_installed() {
+    printf '%s' "$installed_plugins" | node -e '
+        let raw = "";
+        process.stdin.on("data", (chunk) => { raw += chunk; });
+        process.stdin.on("end", () => {
+            try {
+                const pkg = process.argv[1];
+                const plugins = JSON.parse(raw).plugins || [];
+                process.exit(plugins.some((p) => String(p.source || "").includes(pkg)) ? 0 : 1);
+            } catch {
+                process.exit(1);
+            }
+        });
+    ' "$1"
+}
+ensure_plugin() {
+    local package="$1"
+    if plugin_installed "$package"; then
+        return 0
+    fi
+    s6-setuidgid claworc openclaw plugins install "$package" --accept-capabilities \
+        || echo "svc-openclaw: could not install $package (continuing)"
+}
+
 if [ -n "$OPENCLAW_INITIAL_SLACK" ]; then
-    s6-setuidgid claworc openclaw plugins install @openclaw/slack \
-        --accept-capabilities --force \
-        || echo "svc-openclaw: could not install @openclaw/slack (continuing)"
+    ensure_plugin @openclaw/slack
 fi
 if [ -n "$OPENCLAW_INITIAL_DISCORD" ]; then
-    s6-setuidgid claworc openclaw plugins install @openclaw/discord \
-        --accept-capabilities --force \
-        || echo "svc-openclaw: could not install @openclaw/discord (continuing)"
+    ensure_plugin @openclaw/discord
 fi
 if [ -n "$OPENCLAW_INITIAL_BRAVE_PLUGIN" ]; then
-    s6-setuidgid claworc openclaw plugins install @openclaw/brave-plugin \
-        --accept-capabilities --force \
-        || echo "svc-openclaw: could not install @openclaw/brave-plugin (continuing)"
+    ensure_plugin @openclaw/brave-plugin
 fi
 if [ -n "$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN" ]; then
-    s6-setuidgid claworc openclaw plugins install @martian-engineering/lossless-claw \
-        --accept-capabilities --force \
-        || echo "svc-openclaw: could not install @martian-engineering/lossless-claw (continuing)"
+    ensure_plugin @martian-engineering/lossless-claw
 fi
 
 # Always reaffirm gateway settings — these are baked into the skeleton too,

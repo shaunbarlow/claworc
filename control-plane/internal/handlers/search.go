@@ -292,7 +292,7 @@ func applySearchConfig(ctx context.Context, agent sshproxy.Instance, name string
 }
 
 // pushSearchConfig is the async best-effort wrapper around applySearchConfig
-// for a running instance, mirroring pushMemoryConfig/pushSlackConfig.
+// for a running instance, mirroring pushMemoryConfig.
 func pushSearchConfig(instanceID uint, name string) {
 	if SSHMgr == nil {
 		return
