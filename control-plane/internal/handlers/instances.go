@@ -3039,7 +3039,28 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 		return
 	}
 
-	// Set model config via openclaw config set
+	// Register gateway-backed providers before selecting a model. Current
+	// OpenClaw validates agents.defaults.model against the known provider
+	// catalog; setting a custom model first is rejected, even though the
+	// provider write that follows would make it valid.
+	if len(gatewayProviders) > 0 && gatewayPort > 0 {
+		providersJSON, err := buildOpenClawProvidersJSON(models, gatewayProviders, gatewayPort)
+		if err != nil {
+			log.Printf("Error marshaling gateway providers for %s: %v", utils.SanitizeForLog(name), err)
+		} else if providersJSON != "" {
+			// One atomic replace. models.providers is a protected map path, so
+			// `--replace` is what lets a de-selected provider be dropped.
+			stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "models.providers", providersJSON, "--replace", "--json")
+			if err != nil {
+				log.Printf("Error setting gateway providers for %s: %v", utils.SanitizeForLog(name), err)
+			} else if code != 0 {
+				log.Printf("Failed to set gateway providers for %s: stdout=%q stderr=%q",
+					utils.SanitizeForLog(name), utils.SanitizeForLog(stdout), utils.SanitizeForLog(stderr))
+			}
+		}
+	}
+
+	// Set model config via openclaw config set.
 	if len(models) > 0 {
 		modelConfig := map[string]interface{}{
 			"primary": models[0],
@@ -3110,30 +3131,6 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 				log.Printf("Error setting modelPolicy.allow for %s: %v", utils.SanitizeForLog(name), err)
 			} else if code != 0 {
 				log.Printf("Failed to set modelPolicy.allow for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
-			}
-		}
-	}
-
-	// Set gateway providers via openclaw CLI.
-	if len(gatewayProviders) > 0 && gatewayPort > 0 {
-		providersJSON, err := buildOpenClawProvidersJSON(models, gatewayProviders, gatewayPort)
-		if err != nil {
-			log.Printf("Error marshaling gateway providers for %s: %v", utils.SanitizeForLog(name), err)
-		} else if providersJSON != "" {
-			// One atomic replace. models.providers is a protected map path, so
-			// `--replace` is what lets a de-selected provider be dropped;
-			// without it OpenClaw refuses the write ("Refusing to replace
-			// models.providers; it would remove existing entries"). Unsetting
-			// the path first is worse than useless: that write is itself
-			// rejected by OpenClaw's size-drop guard on a realistic config,
-			// and when it does land, a failing set leaves `"models": {}`
-			// behind -- an agent with no providers at all.
-			stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "models.providers", providersJSON, "--replace", "--json")
-			if err != nil {
-				log.Printf("Error setting gateway providers for %s: %v", utils.SanitizeForLog(name), err)
-			} else if code != 0 {
-				log.Printf("Failed to set gateway providers for %s: stdout=%q stderr=%q",
-					utils.SanitizeForLog(name), utils.SanitizeForLog(stdout), utils.SanitizeForLog(stderr))
 			}
 		}
 	}

@@ -207,6 +207,24 @@ func TestConfigureInstance_ProvidersSet(t *testing.T) {
 	}
 }
 
+func TestConfigureInstance_RegistersProvidersBeforeSelectingCustomModel(t *testing.T) {
+	inst := &mockInstance{}
+	providers := map[string]GatewayProvider{
+		"test-openai": {Key: "vk-test", APIType: "openai-completions"},
+	}
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test", []string{"test-model"}, providers, 40001)
+
+	if len(inst.calls) < 5 {
+		t.Fatalf("expected provider, model, allowlist, policy, and gateway calls; got %v", inst.calls)
+	}
+	if got := inst.calls[0]; got[0] != "config" || got[1] != "set" || got[2] != "models.providers" {
+		t.Errorf("custom provider must be registered before model selection, got first call %v", got)
+	}
+	if got := inst.calls[1]; got[0] != "config" || got[1] != "set" || got[2] != "agents.defaults.model" {
+		t.Errorf("model selection should follow provider registration, got second call %v", got)
+	}
+}
+
 // containsArg reports whether an ExecOpenclaw arg list contains flag.
 func containsArg(call []string, flag string) bool {
 	for _, a := range call {
