@@ -35,7 +35,7 @@ export default function SharedFoldersPage() {
 
   const { data: instances = [] } = useQuery({
     queryKey: ["instances"],
-    queryFn: fetchInstances,
+    queryFn: () => fetchInstances(),
   });
 
   const instanceMap = new Map(instances.map((i) => [i.id, i.display_name]));
@@ -231,7 +231,7 @@ function FolderModal({
 
   const { data: instances = [] } = useQuery({
     queryKey: ["instances"],
-    queryFn: fetchInstances,
+    queryFn: () => fetchInstances(),
   });
 
   const { data: existingFolders = [] } = useQuery({

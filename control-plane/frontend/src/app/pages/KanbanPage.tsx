@@ -70,7 +70,7 @@ const ROLE_COLORS: Record<string, { bg: string; border: string; name: string }> 
 };
 
 function roleOf(c: KanbanComment) {
-  return ROLE_COLORS[c.kind] ?? ROLE_COLORS.assistant;
+  return ROLE_COLORS[c.kind] ?? ROLE_COLORS.assistant!;
 }
 
 // Author-to-avatar color (deterministic)
@@ -87,7 +87,7 @@ function avatarColor(author: string): string {
   ];
   let h = 0;
   for (let i = 0; i < author.length; i++) h = (h * 31 + author.charCodeAt(i)) | 0;
-  return palette[Math.abs(h) % palette.length];
+  return palette[Math.abs(h) % palette.length] ?? palette[0]!;
 }
 
 function authorInitials(author: string): string {
@@ -364,7 +364,8 @@ export default function KanbanPage() {
 
   useEffect(() => {
     if (selectedBoardId == null && boardsQ.data && boardsQ.data.length > 0) {
-      setSelectedBoardId(boardsQ.data[0].id);
+      const firstBoardId = boardsQ.data[0]?.id;
+      if (firstBoardId != null) setSelectedBoardId(firstBoardId);
     }
   }, [boardsQ.data, selectedBoardId]);
 
@@ -393,7 +394,8 @@ export default function KanbanPage() {
     (boardQ.data?.tasks ?? []).forEach((t) => {
       if (t.status === "archived") return;
       const key = t.status === "dispatching" ? "in_progress" : t.status;
-      (buckets[key] ?? buckets.todo).push(t);
+      const targetBucket = buckets[key] ?? buckets.todo;
+      if (targetBucket) targetBucket.push(t);
     });
     return buckets;
   }, [boardQ.data]);

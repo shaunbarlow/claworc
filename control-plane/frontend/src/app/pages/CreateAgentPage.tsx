@@ -30,7 +30,7 @@ export default function CreateAgentPage() {
   useEffect(() => {
     if (allowedTeams.length === 0) return;
     if (!teamId || !allowedTeams.some((t) => t.id === teamId)) {
-      setTeamId(allowedTeams[0].id);
+      setTeamId(allowedTeams[0]?.id ?? null);
     }
   }, [allowedTeams, teamId]);
 

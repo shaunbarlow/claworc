@@ -250,7 +250,7 @@ function ProvidersStep({ onDone }: { onDone: () => void }) {
                     <ProviderIcon provider={catalogIconMap[p.provider] ?? p.provider} size={22} />
                   ) : (
                     <span className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
-                      {p.name[0].toUpperCase()}
+                      {p.name.charAt(0).toUpperCase()}
                     </span>
                   )}
                 </div>

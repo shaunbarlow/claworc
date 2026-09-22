@@ -516,7 +516,7 @@ export default function AgentDetailPage() {
             {iconKey ? (
               <ProviderIcon provider={iconKey} size={18} />
             ) : (
-              <span className="text-xs font-semibold text-gray-500">{p.name[0].toUpperCase()}</span>
+              <span className="text-xs font-semibold text-gray-500">{p.name.charAt(0).toUpperCase()}</span>
             )}
           </div>
           <span className="text-sm font-semibold text-gray-900">{p.name}</span>
@@ -1315,7 +1315,7 @@ export default function AgentDetailPage() {
                             const valid = new Set(p.models!.map((m) => m.id));
                             initialModels[p.id] = storedForProvider.filter((m) => valid.has(m));
                           } else if (p.provider && catalogDetailMap[p.provider]) {
-                            const valid = new Set(catalogDetailMap[p.provider].models.map((m) => m.model_id));
+                            const valid = new Set((catalogDetailMap[p.provider]?.models ?? []).map((m) => m.model_id));
                             initialModels[p.id] = storedForProvider.filter((m) => valid.has(m));
                           } else {
                             initialModels[p.id] = storedForProvider;

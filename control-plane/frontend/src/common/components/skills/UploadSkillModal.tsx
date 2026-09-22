@@ -42,7 +42,7 @@ export default function UploadSkillModal({ onClose, onUploaded }: Props) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const detail: string = (error as any)?.response?.data?.detail ?? "";
             const match = detail.match(/Skill '(.+)' already exists/);
-            setConflictSlug(match ? match[1] : selectedFile.name.replace(".zip", ""));
+            setConflictSlug(match?.[1] ?? selectedFile.name.replace(".zip", ""));
           }
         },
       },

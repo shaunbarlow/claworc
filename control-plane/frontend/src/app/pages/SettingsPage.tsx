@@ -96,8 +96,8 @@ export default function SettingsPage() {
   }
 
   const effective = (key: string): string => {
-    if (key in resources) return resources[key];
-    const v = (settings as Record<string, unknown>)[key];
+    if (key in resources) return resources[key] ?? "";
+    const v = (settings as unknown as Record<string, unknown>)[key];
     return typeof v === "string" ? v : "";
   };
   const resourceErrors = validateResourceQuantities({
@@ -349,7 +349,7 @@ function ApiKeysTab({
                           <ProviderIcon provider={catalogIconMap[p.provider] ?? p.provider} size={22} />
                         ) : (
                           <span className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-500">
-                            {p.name[0].toUpperCase()}
+                            {(p.name[0] ?? "?").toUpperCase()}
                           </span>
                         )}
                       </div>
@@ -611,7 +611,9 @@ function EnvironmentTab({
                   <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
                   <input
                     type="text"
-                    defaultValue={(settings as Record<string, unknown>)[field.key] as string ?? ""}
+                    defaultValue={
+                      (settings as unknown as Record<string, unknown>)[field.key] as string ?? ""
+                    }
                     onChange={(e) => setResources((r) => ({ ...r, [field.key]: e.target.value }))}
                     className={`w-full px-3 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${err ? "border-red-300" : "border-gray-300"}`}
                   />
@@ -649,7 +651,10 @@ function EnvironmentTab({
               <input
                 type="number"
                 min={1}
-                defaultValue={settings.default_browser_idle_minutes ?? "15"}
+                defaultValue={
+                  (settings as unknown as Record<string, unknown>)
+                    .default_browser_idle_minutes as string ?? "15"
+                }
                 onChange={(e) => setResources((r) => ({ ...r, default_browser_idle_minutes: e.target.value }))}
                 className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -659,7 +664,10 @@ function EnvironmentTab({
               <input
                 type="number"
                 min={5}
-                defaultValue={settings.default_browser_ready_seconds ?? "60"}
+                defaultValue={
+                  (settings as unknown as Record<string, unknown>)
+                    .default_browser_ready_seconds as string ?? "60"
+                }
                 onChange={(e) => setResources((r) => ({ ...r, default_browser_ready_seconds: e.target.value }))}
                 className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />

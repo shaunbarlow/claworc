@@ -79,8 +79,10 @@ export async function uploadDirectory(
 ): Promise<{ success: boolean; count: number }> {
   const formData = new FormData();
   for (let i = 0; i < files.length; i++) {
-    formData.append("files", files[i]);
-    formData.append("paths", files[i].webkitRelativePath);
+    const file = files.item(i);
+    if (!file) continue;
+    formData.append("files", file);
+    formData.append("paths", file.webkitRelativePath);
   }
 
   const { data } = await client.post(

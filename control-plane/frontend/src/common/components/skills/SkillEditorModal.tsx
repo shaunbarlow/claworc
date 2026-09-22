@@ -43,7 +43,8 @@ export default function SkillEditorModal({ skill, onClose }: SkillEditorModalPro
   useEffect(() => {
     if (selected || !files || files.length === 0) return;
     const firstText = files.find((f) => !f.binary);
-    setSelected((firstText ?? files[0]).path);
+    const first = firstText ?? files[0];
+    if (first) setSelected(first.path);
   }, [files, selected]);
 
   const selectedEntry = useMemo(
@@ -56,10 +57,7 @@ export default function SkillEditorModal({ skill, onClose }: SkillEditorModalPro
     selectedEntry && !selectedEntry.binary ? selectedEntry.path : null,
   );
 
-  const currentValue =
-    selected && selected in edits
-      ? edits[selected]
-      : (fileContent?.content ?? "");
+  const currentValue = selected ? (edits[selected] ?? fileContent?.content ?? "") : "";
   const isDirty = !!(selected && selected in edits && edits[selected] !== fileContent?.content);
   const dirtyPaths = Object.keys(edits).filter((p) => edits[p] !== undefined);
   const hasAnyDirty = dirtyPaths.length > 0;
@@ -72,6 +70,7 @@ export default function SkillEditorModal({ skill, onClose }: SkillEditorModalPro
   const handleSaveCurrent = () => {
     if (!selected || !isDirty || !selectedEntry || selectedEntry.binary) return;
     const content = edits[selected];
+    if (content === undefined) return;
     save.mutate(
       { path: selected, content },
       {

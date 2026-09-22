@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Trash2, Download, Loader2, Pencil, Square, ChevronLeft, ChevronRight } from "lucide-react";
 import FolderInput from "@common/components/FolderInput";
@@ -35,7 +35,7 @@ function formatDate(iso: string): string {
 function cronToHuman(cron: string): string {
   const parts = cron.split(" ");
   if (parts.length !== 5) return cron;
-  const [min, hour, dom, , dow] = parts;
+  const [min = "", hour = "", dom, , dow] = parts;
   if (dom === "1" && dow === "*") return `Monthly on 1st at ${hour}:${min.padStart(2, "0")}`;
   if (dow !== "*") {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

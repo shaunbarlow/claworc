@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useUsageStats, useResetUsageLogs } from "@common/hooks/useProviders";
 import AgentTeamPicker, {
@@ -26,6 +25,14 @@ function formatTokens(v: number) {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
   return String(v);
+}
+
+type ChartValue = number | string | readonly (number | string)[] | undefined;
+
+function chartNumber(value: ChartValue): number {
+  const scalar = Array.isArray(value) ? value[0] : value;
+  const number = Number(scalar);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function today() {
@@ -94,10 +101,11 @@ export default function UsagePage() {
     return label.slice(5); // "MM-DD"
   }
 
-  function formatTimeTooltip(label: string): string {
-    if (granularity === "minute") return label.replace("T", " ") + ":00";
-    if (granularity === "hour") return label.replace("T", " ") + ":00";
-    return `Date: ${label}`;
+  function formatTimeTooltip(label: unknown): string {
+    const value = typeof label === "string" ? label : "";
+    if (granularity === "minute") return value.replace("T", " ") + ":00";
+    if (granularity === "hour") return value.replace("T", " ") + ":00";
+    return `Date: ${value}`;
   }
 
   const total = stats?.total;
@@ -227,7 +235,7 @@ export default function UsagePage() {
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatTimeLabel} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={(v: number) => [v.toLocaleString(), "Requests"]}
+                    formatter={(v: ChartValue) => [chartNumber(v).toLocaleString(), "Requests"]}
                     labelFormatter={formatTimeTooltip}
                   />
                   <Area
@@ -256,7 +264,7 @@ export default function UsagePage() {
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatTimeLabel} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v.toFixed(2)}`} />
                   <Tooltip
-                    formatter={(v: number) => [formatCost(v), "Cost"]}
+                    formatter={(v: ChartValue) => [formatCost(chartNumber(v)), "Cost"]}
                     labelFormatter={formatTimeTooltip}
                   />
                   <Area
@@ -286,7 +294,7 @@ export default function UsagePage() {
                       tick={{ fontSize: 11 }}
                       width={90}
                     />
-                    <Tooltip formatter={(v: number) => [formatCost(v), "Cost"]} />
+                    <Tooltip formatter={(v: ChartValue) => [formatCost(chartNumber(v)), "Cost"]} />
                     <Bar dataKey="cost_usd" fill="#6366f1" name="Cost (USD)" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -309,7 +317,7 @@ export default function UsagePage() {
                       tick={{ fontSize: 11 }}
                       width={90}
                     />
-                    <Tooltip formatter={(v: number) => [formatCost(v), "Cost"]} />
+                    <Tooltip formatter={(v: ChartValue) => [formatCost(chartNumber(v)), "Cost"]} />
                     <Bar dataKey="cost_usd" fill="#f59e0b" name="Cost (USD)" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -334,7 +342,7 @@ export default function UsagePage() {
                       tick={{ fontSize: 10 }}
                       width={160}
                     />
-                    <Tooltip formatter={(v: number) => [formatTokens(v), ""]} />
+                    <Tooltip formatter={(v: ChartValue) => [formatTokens(chartNumber(v)), ""]} />
                     <Legend />
                     <Bar dataKey="input_tokens" stackId="a" fill="#3b82f6" name="Input tokens" />
                     <Bar dataKey="output_tokens" stackId="a" fill="#818cf8" name="Output tokens" radius={[0, 4, 4, 0]} />

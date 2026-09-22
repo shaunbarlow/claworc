@@ -9,7 +9,7 @@ export function buildSSHTooltip(status: SSHStatusResponse | undefined): string |
 
   if (status.recent_events.length > 0) {
     const last = status.recent_events[status.recent_events.length - 1];
-    if (last.reason) {
+    if (last?.reason) {
       lines.push(last.reason);
     }
   }

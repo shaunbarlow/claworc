@@ -29,17 +29,17 @@ interface Props {
 
 export default function BackupPanel({ instanceId }: Props) {
   const { data: backups, isLoading } = useInstanceBackups(instanceId);
-  const createMutation = useCreateBackup(instanceId);
-  const deleteMutation = useDeleteBackup(instanceId);
+  const createMutation = useCreateBackup();
+  const deleteMutation = useDeleteBackup();
   const cancelMutation = useCancelBackup();
-  const restoreMutation = useRestoreBackup(instanceId);
+  const restoreMutation = useRestoreBackup();
   const { canCreateInstances } = useAuth();
   const [note, setNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<number | null>(null);
 
-  const handleCreate = (type: "full" | "incremental") => {
-    createMutation.mutate({ type, note: note || undefined });
+  const handleCreate = () => {
+    createMutation.mutate({ instanceId, note: note || undefined });
     setNote("");
   };
 
@@ -60,14 +60,14 @@ export default function BackupPanel({ instanceId }: Props) {
             />
           </div>
           <button
-            onClick={() => handleCreate("full")}
+            onClick={handleCreate}
             disabled={createMutation.isPending}
             className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50"
           >
             Full Backup
           </button>
           <button
-            onClick={() => handleCreate("incremental")}
+            onClick={handleCreate}
             disabled={createMutation.isPending}
             className="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-md hover:bg-gray-700 disabled:opacity-50"
           >
@@ -90,7 +90,7 @@ export default function BackupPanel({ instanceId }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <th className="px-6 py-3">Type</th>
+                <th className="px-6 py-3">Paths</th>
                 <th className="px-6 py-3">Status</th>
                 <th className="px-6 py-3">Size</th>
                 <th className="px-6 py-3">Date</th>
@@ -102,12 +102,8 @@ export default function BackupPanel({ instanceId }: Props) {
               {backups.map((b: Backup) => (
                 <tr key={b.id} className="hover:bg-gray-50">
                   <td className="px-6 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                      b.type === "full"
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-purple-100 text-purple-800"
-                    }`}>
-                      {b.type}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                      {b.paths}
                     </span>
                   </td>
                   <td className="px-6 py-3">
@@ -133,7 +129,7 @@ export default function BackupPanel({ instanceId }: Props) {
                             confirmRestore === b.id ? (
                               <span className="flex items-center gap-1">
                                 <button
-                                  onClick={() => { restoreMutation.mutate(b.id); setConfirmRestore(null); }}
+                                  onClick={() => { restoreMutation.mutate({ backupId: b.id, instanceId }); setConfirmRestore(null); }}
                                   className="text-xs text-orange-600 hover:text-orange-800 font-medium"
                                 >
                                   Confirm
