@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -97,216 +96,104 @@ func (mockOps) WorkloadAddress(_ context.Context, _ string, _ int) (string, int,
 }
 func (mockOps) SelfUpdate(_ context.Context, _ string) (bool, error) { return false, nil }
 
-func TestConfigureInstance_NoOp(t *testing.T) {
-	inst := &mockInstance{}
-	// Empty models and providers → early return, no calls
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test", nil, nil, 0)
-	if len(inst.calls) != 0 {
-		t.Errorf("expected 0 calls, got %d", len(inst.calls))
-	}
-}
-
-func TestConfigureInstance_ModelSet(t *testing.T) {
-	inst := &mockInstance{}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		[]string{"claude-3-5-sonnet"}, nil, 0)
-
-	if len(inst.calls) < 4 {
-		t.Fatalf("expected at least 4 calls (model set + allowlist set + modelPolicy.allow set + gateway stop), got %d", len(inst.calls))
-	}
-	// First call: config set agents.defaults.model
-	call0 := inst.calls[0]
-	if call0[0] != "config" || call0[1] != "set" || call0[2] != "agents.defaults.model" {
-		t.Errorf("unexpected first call: %v", call0)
-	}
-	// Second call: config set agents.defaults.models (allowlist). No preceding
-	// `unset` -- see ConfigureInstance: unsetting is a separate write that
-	// OpenClaw's size-drop guard rejects, and a failure after it lands leaves
-	// the agent with no allowlist at all.
-	call1 := inst.calls[1]
-	if call1[0] != "config" || call1[1] != "set" || call1[2] != "agents.defaults.models" {
-		t.Errorf("unexpected second call: %v", call1)
-	}
-	if !strings.Contains(call1[3], "claude-3-5-sonnet") {
-		t.Errorf("models allowlist should contain claude-3-5-sonnet, got: %s", call1[3])
-	}
-	// Third call: config set agents.defaults.modelPolicy.allow. This is the
-	// explicit restriction OpenClaw doctor expects instead of relying on
-	// agents.defaults.models doubling as an implicit allowlist (a legacy
-	// key doctor now flags for migration).
-	call2 := inst.calls[2]
-	if call2[0] != "config" || call2[1] != "set" || call2[2] != "agents.defaults.modelPolicy.allow" {
-		t.Errorf("unexpected third call: %v", call2)
-	}
-	if !strings.Contains(call2[3], "claude-3-5-sonnet") {
-		t.Errorf("modelPolicy.allow should contain claude-3-5-sonnet, got: %s", call2[3])
-	}
-	if !containsArg(call2, "--replace") {
-		t.Errorf("modelPolicy.allow set must pass --replace, got %v", call2)
-	}
-	for _, c := range inst.calls {
-		if c[1] == "unset" {
-			t.Errorf("config unset must not be used; got %v", c)
-		}
-	}
-	// The allowlist replaces de-selected models, which OpenClaw only permits
-	// with --replace on this protected map path.
-	if !containsArg(call1, "--replace") {
-		t.Errorf("allowlist set must pass --replace, got %v", call1)
-	}
-	// Last call must be gateway stop
-	last := inst.calls[len(inst.calls)-1]
-	if last[0] != "gateway" || last[1] != "stop" || !containsArg(last, "--force") {
-		t.Errorf("expected last call to be forced gateway stop, got %v", last)
-	}
-}
-
-func TestConfigureInstance_GatewayStop(t *testing.T) {
-	inst := &mockInstance{}
-	// Only providers → should set providers then stop gateway
-	providers := map[string]GatewayProvider{
-		"anthropic": {Key: "vk-test", APIType: "openai-completions"},
-	}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		nil, providers, 40001)
-
-	if len(inst.calls) < 1 {
-		t.Fatalf("expected at least 1 call (gateway stop), got %d", len(inst.calls))
-	}
-	last := inst.calls[len(inst.calls)-1]
-	if last[0] != "gateway" || last[1] != "stop" || !containsArg(last, "--force") {
-		t.Errorf("expected forced gateway stop, got %v", last)
-	}
-}
-
-func TestConfigureInstance_ProvidersSet(t *testing.T) {
-	inst := &mockInstance{}
-	providers := map[string]GatewayProvider{
-		"anthropic": {Key: "vk-test", APIType: "openai-completions"},
-	}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		nil, providers, 40001)
-
-	// Should have: providers set + gateway stop. One atomic write, no unset --
-	// `unset models.providers` is rejected by OpenClaw's size-drop guard on any
-	// realistic config, and when it does land a failing set leaves the agent
-	// with `"models": {}`.
-	if len(inst.calls) < 2 {
-		t.Fatalf("expected at least 2 calls, got %d", len(inst.calls))
-	}
-	if c := inst.calls[0]; c[0] != "config" || c[1] != "set" || c[2] != "models.providers" {
-		t.Errorf("expected providers set first, got %v", c)
-	}
-	if !containsArg(inst.calls[0], "--replace") {
-		t.Errorf("providers set must pass --replace, got %v", inst.calls[0])
-	}
-	for _, c := range inst.calls {
-		if c[1] == "unset" {
-			t.Errorf("config unset must not be used; got %v", c)
-		}
-	}
-}
-
-func TestConfigureInstance_RegistersProvidersBeforeSelectingCustomModel(t *testing.T) {
-	inst := &mockInstance{}
-	providers := map[string]GatewayProvider{
-		"test-openai": {Key: "vk-test", APIType: "openai-completions"},
-	}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test", []string{"test-model"}, providers, 40001)
-
-	if len(inst.calls) < 5 {
-		t.Fatalf("expected provider, model, allowlist, policy, and gateway calls; got %v", inst.calls)
-	}
-	if got := inst.calls[0]; got[0] != "config" || got[1] != "set" || got[2] != "models.providers" {
-		t.Errorf("custom provider must be registered before model selection, got first call %v", got)
-	}
-	if got := inst.calls[1]; got[0] != "config" || got[1] != "set" || got[2] != "agents.defaults.model" {
-		t.Errorf("model selection should follow provider registration, got second call %v", got)
-	}
-}
-
-// containsArg reports whether an ExecOpenclaw arg list contains flag.
-func containsArg(call []string, flag string) bool {
-	for _, a := range call {
-		if a == flag {
+func containsArg(call []string, argument string) bool {
+	for _, value := range call {
+		if value == argument {
 			return true
 		}
 	}
 	return false
 }
 
-func TestConfigureInstance_NilModelsEmptySlice(t *testing.T) {
+func configBatchValue(t *testing.T, call []string, path string) (json.RawMessage, bool) {
+	t.Helper()
+	if len(call) < 5 || call[0] != "config" || call[1] != "set" || call[2] != "--batch-json" {
+		return nil, false
+	}
+	var operations []struct {
+		Path  string          `json:"path"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(call[3]), &operations); err != nil {
+		t.Fatalf("invalid config batch JSON: %v", err)
+	}
+	for _, operation := range operations {
+		if operation.Path == path {
+			return operation.Value, true
+		}
+	}
+	return nil, false
+}
+
+func configBatchCall(t *testing.T, calls [][]string) []string {
+	t.Helper()
+	for _, call := range calls {
+		if len(call) >= 4 && call[0] == "config" && call[1] == "set" && call[2] == "--batch-json" {
+			return call
+		}
+	}
+	t.Fatalf("atomic config batch call not found: %v", calls)
+	return nil
+}
+
+func TestConfigureInstance_NoOp(t *testing.T) {
 	inst := &mockInstance{}
-	// Nil models but with gateway providers → skip model set and allowlist, set providers, stop gateway
-	providers := map[string]GatewayProvider{
-		"openai": {Key: "vk-test2", APIType: "openai-completions"},
-	}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		nil, providers, 40001)
-
-	for _, call := range inst.calls {
-		if call[0] == "config" && call[2] == "agents.defaults.model" {
-			t.Errorf("model set should not be called when models is nil, got call: %v", call)
-		}
-		if call[0] == "config" && call[2] == "agents.defaults.models" {
-			t.Errorf("models allowlist should not be called when models is nil, got call: %v", call)
-		}
-		if call[0] == "config" && call[2] == "agents.defaults.modelPolicy.allow" {
-			t.Errorf("modelPolicy.allow should not be called when models is nil, got call: %v", call)
-		}
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test", nil, nil, 0)
+	if len(inst.calls) != 0 {
+		t.Errorf("expected 0 calls, got %d", len(inst.calls))
 	}
 }
 
-func TestConfigureInstance_ModelSetFailure(t *testing.T) {
-	inst := &mockInstance{
-		results: []callResult{
-			{err: errors.New("SSH error")},
-		},
+func TestConfigureInstance_AppliesModelStateAtomically(t *testing.T) {
+	inst := &mockInstance{}
+	providers := map[string]GatewayProvider{
+		"test-openai": {Key: "vk-test", APIType: "openai-completions", Models: []database.ProviderModel{{ID: "test-model", Name: "Test Model"}}},
 	}
-	// Should log error and return without calling gateway stop
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		[]string{"model-a"}, nil, 0)
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test", []string{"test-openai/test-model"}, providers, 40001)
+	if len(inst.calls) != 2 {
+		t.Fatalf("expected one atomic config write and a gateway restart, got %v", inst.calls)
+	}
+	batch := configBatchCall(t, inst.calls)
+	if !containsArg(batch, "--replace") {
+		t.Errorf("batch must replace protected paths: %v", batch)
+	}
+	for _, path := range []string{"models.providers", "agents.defaults.model", "agents.defaults.models", "agents.defaults.modelPolicy.allow"} {
+		if _, ok := configBatchValue(t, batch, path); !ok {
+			t.Errorf("batch is missing %s: %v", path, batch)
+		}
+	}
+	model, _ := configBatchValue(t, batch, "agents.defaults.model")
+	if !strings.Contains(string(model), "test-openai/test-model") {
+		t.Errorf("primary model missing from batch: %s", model)
+	}
+	last := inst.calls[len(inst.calls)-1]
+	if last[0] != "gateway" || last[1] != "stop" || !containsArg(last, "--force") {
+		t.Errorf("gateway restart must follow a successful batch, got %v", last)
+	}
+}
 
-	// Only one call was made (the failed one), gateway stop should not follow
+func TestConfigureInstance_BatchFailureStopsReconciliation(t *testing.T) {
+	inst := &mockInstance{results: []callResult{{code: 1, stderr: "unknown model"}}}
+	providers := map[string]GatewayProvider{"test-openai": {Key: "vk-test", APIType: "openai-completions"}}
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test", []string{"test-openai/test-model"}, providers, 40001)
 	if len(inst.calls) != 1 {
-		t.Errorf("expected 1 call (failed model set), got %d", len(inst.calls))
+		t.Errorf("failed batch must not restart the gateway or partially reconcile: %v", inst.calls)
 	}
+	configBatchCall(t, inst.calls)
 }
 
-func TestConfigureInstance_ModelSetNonZeroCode(t *testing.T) {
-	inst := &mockInstance{
-		results: []callResult{
-			{code: 1, stderr: "unknown model"},
-		},
+func TestConfigureInstance_ProviderOnlyBatch(t *testing.T) {
+	inst := &mockInstance{}
+	providers := map[string]GatewayProvider{"anthropic": {Key: "vk-test", APIType: "openai-completions"}}
+	ConfigureInstance(context.Background(), mockOps{}, inst, "test", nil, providers, 40001)
+	batch := configBatchCall(t, inst.calls)
+	if _, ok := configBatchValue(t, batch, "models.providers"); !ok {
+		t.Errorf("provider-only batch missing models.providers: %v", batch)
 	}
-	providers := map[string]GatewayProvider{
-		"anthropic": {Key: "vk-test", APIType: "openai-completions"},
-	}
-	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
-		[]string{"model-a"}, providers, 40001)
-
-	hasProviders := false
-	hasAllowlist := false
-	hasModelPolicy := false
-	for _, c := range inst.calls {
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			hasProviders = true
+	for _, path := range []string{"agents.defaults.model", "agents.defaults.models", "agents.defaults.modelPolicy.allow"} {
+		if _, ok := configBatchValue(t, batch, path); ok {
+			t.Errorf("provider-only batch must not include %s", path)
 		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
-			hasAllowlist = true
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.modelPolicy.allow" {
-			hasModelPolicy = true
-		}
-	}
-	if !hasProviders {
-		t.Errorf("providers must be set even when model config returns non-zero; calls: %v", inst.calls)
-	}
-	if !hasAllowlist {
-		t.Errorf("models allowlist must be set even when model config returns non-zero; calls: %v", inst.calls)
-	}
-	if !hasModelPolicy {
-		t.Errorf("modelPolicy.allow must be set even when model config returns non-zero; calls: %v", inst.calls)
 	}
 }
 
@@ -327,15 +214,13 @@ func TestConfigureInstance_CustomProviderAllModels(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"anthropic/anthropic/claude-sonnet-4-6"}, providers, 40001)
 
-	var providersJSON string
-	var allowlistJSON string
-	for _, c := range inst.calls {
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			providersJSON = c[3]
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
-			allowlistJSON = c[3]
-		}
+	batch := configBatchCall(t, inst.calls)
+	providersValue, providersOK := configBatchValue(t, batch, "models.providers")
+	allowlistValue, allowlistOK := configBatchValue(t, batch, "agents.defaults.models")
+	providersJSON := string(providersValue)
+	allowlistJSON := string(allowlistValue)
+	if !providersOK || !allowlistOK {
+		t.Fatalf("batch missing provider or allowlist state: %v", batch)
 	}
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")
@@ -376,15 +261,13 @@ func TestConfigureInstance_CatalogProviderModelsFiltered(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"anthropic/anthropic/claude-sonnet-4-6"}, providers, 40001)
 
-	var providersJSON string
-	var allowlistJSON string
-	for _, c := range inst.calls {
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			providersJSON = c[3]
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
-			allowlistJSON = c[3]
-		}
+	batch := configBatchCall(t, inst.calls)
+	providersValue, providersOK := configBatchValue(t, batch, "models.providers")
+	allowlistValue, allowlistOK := configBatchValue(t, batch, "agents.defaults.models")
+	providersJSON := string(providersValue)
+	allowlistJSON := string(allowlistValue)
+	if !providersOK || !allowlistOK {
+		t.Fatalf("batch missing provider or allowlist state: %v", batch)
 	}
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")
@@ -430,15 +313,13 @@ func TestConfigureInstance_CatalogProviderWithCachedModelsFiltered(t *testing.T)
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"anthropic/anthropic/claude-sonnet-4-6"}, providers, 40001)
 
-	var providersJSON string
-	var allowlistJSON string
-	for _, c := range inst.calls {
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			providersJSON = c[3]
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
-			allowlistJSON = c[3]
-		}
+	batch := configBatchCall(t, inst.calls)
+	providersValue, providersOK := configBatchValue(t, batch, "models.providers")
+	allowlistValue, allowlistOK := configBatchValue(t, batch, "agents.defaults.models")
+	providersJSON := string(providersValue)
+	allowlistJSON := string(allowlistValue)
+	if !providersOK || !allowlistOK {
+		t.Fatalf("batch missing provider or allowlist state: %v", batch)
 	}
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")
@@ -479,14 +360,14 @@ func TestConfigureInstance_CatalogProviderFallsBackWhenNoneSelected(t *testing.T
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		nil, providers, 40001)
 
-	var providersJSON string
-	for _, c := range inst.calls {
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			providersJSON = c[3]
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "agents.defaults.models" {
-			t.Errorf("models allowlist should not be set when models is nil; got call: %v", c)
-		}
+	batch := configBatchCall(t, inst.calls)
+	providersValue, providersOK := configBatchValue(t, batch, "models.providers")
+	providersJSON := string(providersValue)
+	if !providersOK {
+		t.Fatalf("batch missing models.providers: %v", batch)
+	}
+	if _, ok := configBatchValue(t, batch, "agents.defaults.models"); ok {
+		t.Errorf("models allowlist should not be set when models is nil; got batch: %v", batch)
 	}
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")
@@ -536,17 +417,14 @@ func TestConfigureInstance_NewProviderDoesNotEmptyConfig(t *testing.T) {
 	ConfigureInstance(context.Background(), mockOps{}, inst, "test",
 		[]string{"anthropic/claude-sonnet-5"}, providers, 40001)
 
-	var providersJSON string
-	for _, c := range inst.calls {
-		if c[1] == "unset" {
-			t.Errorf("config unset must not be used -- OpenClaw rejects the shrink; got %v", c)
-		}
-		if c[0] == "config" && c[1] == "set" && c[2] == "models.providers" {
-			providersJSON = c[3]
-			if !containsArg(c, "--replace") {
-				t.Errorf("providers set must pass --replace, got %v", c)
-			}
-		}
+	batch := configBatchCall(t, inst.calls)
+	if !containsArg(batch, "--replace") {
+		t.Errorf("provider batch must pass --replace, got %v", batch)
+	}
+	providersValue, providersOK := configBatchValue(t, batch, "models.providers")
+	providersJSON := string(providersValue)
+	if !providersOK {
+		t.Fatalf("batch missing models.providers: %v", batch)
 	}
 	if providersJSON == "" {
 		t.Fatal("models.providers call not found")

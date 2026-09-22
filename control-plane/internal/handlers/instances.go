@@ -3028,115 +3028,95 @@ func ReorderInstances(w http.ResponseWriter, r *http.Request) {
 // gatewayProviders (optional) maps provider key → gateway auth key for configuring
 // models.providers in OpenClaw to route through the internal LLM gateway.
 // gatewayPort is the port the LLM gateway listens on (typically 40001).
+// openclawConfigBatchOperation is the supported config-set batch wire format.
+// OpenClaw validates every operation against the combined resulting config and
+// persists the whole batch in one atomic write.
+type openclawConfigBatchOperation struct {
+	Path  string      `json:"path"`
+	Value interface{} `json:"value"`
+}
+
+// buildOpenClawConfigBatch builds the complete provider/model desired state for
+// one atomic OpenClaw config mutation. The four paths are interdependent: a
+// custom provider must exist while its provider-qualified model is selected.
+func buildOpenClawConfigBatch(models []string, providersJSON string) (string, error) {
+	operations := make([]openclawConfigBatchOperation, 0, 4)
+	if providersJSON != "" {
+		var providers interface{}
+		if err := json.Unmarshal([]byte(providersJSON), &providers); err != nil {
+			return "", fmt.Errorf("decode providers JSON: %w", err)
+		}
+		operations = append(operations, openclawConfigBatchOperation{Path: "models.providers", Value: providers})
+	}
+	if len(models) > 0 {
+		modelConfig := map[string]interface{}{"primary": models[0], "fallbacks": []string{}}
+		if len(models) > 1 {
+			modelConfig["fallbacks"] = models[1:]
+		}
+		modelsMap := make(map[string]interface{}, len(models))
+		for _, model := range models {
+			modelsMap[model] = map[string]interface{}{}
+		}
+		operations = append(operations,
+			openclawConfigBatchOperation{Path: "agents.defaults.model", Value: modelConfig},
+			openclawConfigBatchOperation{Path: "agents.defaults.models", Value: modelsMap},
+			openclawConfigBatchOperation{Path: "agents.defaults.modelPolicy.allow", Value: models},
+		)
+	}
+	if len(operations) == 0 {
+		return "", nil
+	}
+	batch, err := json.Marshal(operations)
+	if err != nil {
+		return "", fmt.Errorf("marshal config batch: %w", err)
+	}
+	return string(batch), nil
+}
+
 func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrator, inst sshproxy.Instance, name string, models []string, gatewayProviders map[string]GatewayProvider, gatewayPort int) {
 	if len(models) == 0 && len(gatewayProviders) == 0 {
 		return
 	}
 
-	// Wait for instance to become running
 	if !waitForRunning(ctx, ops, name, 120*time.Second) {
 		log.Printf("Timed out waiting for %s to start; models not configured", utils.SanitizeForLog(name))
 		return
 	}
 
-	// Register gateway-backed providers before selecting a model. Current
-	// OpenClaw validates agents.defaults.model against the known provider
-	// catalog; setting a custom model first is rejected, even though the
-	// provider write that follows would make it valid.
+	providersJSON := ""
 	if len(gatewayProviders) > 0 && gatewayPort > 0 {
-		providersJSON, err := buildOpenClawProvidersJSON(models, gatewayProviders, gatewayPort)
+		var err error
+		providersJSON, err = buildOpenClawProvidersJSON(models, gatewayProviders, gatewayPort)
 		if err != nil {
 			log.Printf("Error marshaling gateway providers for %s: %v", utils.SanitizeForLog(name), err)
-		} else if providersJSON != "" {
-			// One atomic replace. models.providers is a protected map path, so
-			// `--replace` is what lets a de-selected provider be dropped.
-			stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "models.providers", providersJSON, "--replace", "--json")
-			if err != nil {
-				log.Printf("Error setting gateway providers for %s: %v", utils.SanitizeForLog(name), err)
-			} else if code != 0 {
-				log.Printf("Failed to set gateway providers for %s: stdout=%q stderr=%q",
-					utils.SanitizeForLog(name), utils.SanitizeForLog(stdout), utils.SanitizeForLog(stderr))
-			}
-		}
-	}
-
-	// Set model config via openclaw config set.
-	if len(models) > 0 {
-		modelConfig := map[string]interface{}{
-			"primary": models[0],
-		}
-		if len(models) > 1 {
-			modelConfig["fallbacks"] = models[1:]
-		} else {
-			modelConfig["fallbacks"] = []string{}
-		}
-		modelJSON, err := json.Marshal(modelConfig)
-		if err != nil {
-			log.Printf("Error marshaling model config for %s: %v", utils.SanitizeForLog(name), err)
 			return
 		}
-		_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.model", string(modelJSON), "--replace", "--json")
-		if err != nil {
-			log.Printf("Error setting model config for %s: %v", utils.SanitizeForLog(name), err)
-			return
-		}
-		if code != 0 {
-			log.Printf("Failed to set model config for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
-			// continue — providers must still be configured even if model config failed
-		}
-
-		// Set models allowlist to restrict the UI dropdown to only configured models
-		modelsMap := make(map[string]interface{}, len(models))
-		for _, m := range models {
-			modelsMap[m] = map[string]interface{}{}
-		}
-		modelsMapJSON, err := json.Marshal(modelsMap)
-		if err != nil {
-			log.Printf("Error marshaling models allowlist for %s: %v", utils.SanitizeForLog(name), err)
-		} else {
-			// A previously-selected model that the admin de-selected has to
-			// disappear, so this is a replace, not a merge. `--replace` is
-			// required for it: agents.defaults.models is a protected map path,
-			// and without the flag OpenClaw refuses any write that would drop
-			// existing entries. Do NOT `unset` first -- removing the path is a
-			// separate write that OpenClaw's size-drop guard rejects outright
-			// on any non-trivial config, and if the follow-up set then fails
-			// the agent is left with no allowlist at all.
-			_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.models", string(modelsMapJSON), "--replace", "--json")
-			if err != nil {
-				log.Printf("Error setting models allowlist for %s: %v", utils.SanitizeForLog(name), err)
-			} else if code != 0 {
-				log.Printf("Failed to set models allowlist for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
-			}
-		}
-
-		// Also set the restriction explicitly via modelPolicy.allow.
-		//
-		// agents.defaults.models above is metadata (aliases/per-model settings)
-		// only; historically a non-empty map there *also* acted as an implicit
-		// allowlist, but that dual role is now the deprecated path -- OpenClaw
-		// doctor flags it as a legacy key needing migration to the explicit
-		// agents.defaults.modelPolicy.allow restriction (see
-		// https://docs.openclaw.ai/concepts/models#quick-model-policy). Once
-		// modelPolicy.allow is set explicitly, agents.defaults.models reverts
-		// to pure metadata and stops tripping the legacy-key warning on every
-		// doctor run. Same protected-path/--replace rationale as above: a
-		// de-selected model has to actually disappear from the list.
-		modelPolicyJSON, err := json.Marshal(models)
-		if err != nil {
-			log.Printf("Error marshaling modelPolicy.allow for %s: %v", utils.SanitizeForLog(name), err)
-		} else {
-			_, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "agents.defaults.modelPolicy.allow", string(modelPolicyJSON), "--replace", "--json")
-			if err != nil {
-				log.Printf("Error setting modelPolicy.allow for %s: %v", utils.SanitizeForLog(name), err)
-			} else if code != 0 {
-				log.Printf("Failed to set modelPolicy.allow for %s: %s", utils.SanitizeForLog(name), utils.SanitizeForLog(stderr))
-			}
-		}
+	}
+	batchJSON, err := buildOpenClawConfigBatch(models, providersJSON)
+	if err != nil {
+		log.Printf("Error building OpenClaw config batch for %s: %v", utils.SanitizeForLog(name), err)
+		return
+	}
+	if batchJSON == "" {
+		return
 	}
 
-	// Restart gateway so it picks up new env vars and config
-	stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "gateway", "stop", "--force")
+	// The provider declaration, default model, metadata map and allowlist form
+	// one transaction. Separate config writes can leave an intermediate config
+	// invalid under current OpenClaw validation and silently lose the primary
+	// model. --batch-json validates the completed config and writes it atomically.
+	stdout, stderr, code, err := inst.ExecOpenclaw(ctx, "config", "set", "--batch-json", batchJSON, "--replace")
+	if err != nil {
+		log.Printf("Error applying OpenClaw config batch for %s: %v", utils.SanitizeForLog(name), err)
+		return
+	}
+	if code != 0 {
+		log.Printf("Failed to apply OpenClaw config batch for %s: stdout=%q stderr=%q", utils.SanitizeForLog(name), utils.SanitizeForLog(stdout), utils.SanitizeForLog(stderr))
+		return
+	}
+
+	// Restart only after the complete desired state has been durably applied.
+	stdout, stderr, code, err = inst.ExecOpenclaw(ctx, "gateway", "stop", "--force")
 	if err != nil {
 		log.Printf("Error restarting gateway for %s: %v", utils.SanitizeForLog(name), err)
 		return
