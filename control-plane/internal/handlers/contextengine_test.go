@@ -179,7 +179,7 @@ func TestApplyContextEngineConfigHotReloadsWhenAlreadyInstalled(t *testing.T) {
 	inst := &database.Instance{Name: "bot-x", ContextEngine: "lossless-claw"}
 
 	agent := &mockInstance{results: []callResult{
-		{stdout: `{"plugins":[{"id":"lossless-claw"}]}`},
+		{stdout: `{"plugins":[{"id":"lossless-claw","version":"1.0.0"}]}`},
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
@@ -206,7 +206,7 @@ func TestApplyContextEngineConfigGrantsConversationAccess(t *testing.T) {
 	inst := &database.Instance{Name: "bot-x", ContextEngine: "lossless-claw"}
 
 	agent := &mockInstance{results: []callResult{
-		{stdout: `{"plugins":[{"id":"lossless-claw"}]}`},
+		{stdout: `{"plugins":[{"id":"lossless-claw","version":"1.0.0"}]}`},
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
@@ -240,7 +240,7 @@ func TestApplyContextEngineConfigInstallsAndRestartsWhenMissing(t *testing.T) {
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
-	argv, ok := findCall(agent.calls, "plugins", "install", "@martian-engineering/lossless-claw")
+	argv, ok := findCall(agent.calls, "plugins", "install", "npm:@martian-engineering/lossless-claw@1.0.0")
 	if !ok {
 		t.Errorf("plugin was never installed; calls: %v", agent.calls)
 	} else if !hasArg(argv, "--accept-capabilities") || !hasArg(argv, "--force") {
@@ -259,7 +259,7 @@ func TestApplyContextEngineConfigSlotIsPlainString(t *testing.T) {
 	inst := &database.Instance{Name: "bot-x", ContextEngine: "lossless-claw"}
 
 	agent := &mockInstance{results: []callResult{
-		{stdout: `{"plugins":[{"id":"lossless-claw"}]}`},
+		{stdout: `{"plugins":[{"id":"lossless-claw","version":"1.0.0"}]}`},
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
@@ -324,5 +324,45 @@ func TestApplyContextEngineConfigTeardownContinuesAfterFailure(t *testing.T) {
 
 	if _, ok := findCall(agent.calls, "config", "unset", "plugins.entries.lossless-claw.enabled"); !ok {
 		t.Errorf("a failed unset aborted the rest of the teardown; calls: %v", agent.calls)
+	}
+}
+
+func TestLosslessClawVersionPolicy(t *testing.T) {
+	setupHandlersTestDB(t)
+	if _, err := parseLosslessClawSettings([]byte(`{"version":"1.1.0"}`)); err != nil {
+		t.Fatalf("approved release rejected: %v", err)
+	}
+	if _, err := parseLosslessClawSettings([]byte(`{"version":"latest"}`)); err == nil {
+		t.Fatal("moving npm tag was accepted")
+	}
+	if got := effectiveLosslessClawSettings(LosslessClawSettings{}, LosslessClawSettings{}).Version; got != "1.0.0" {
+		t.Errorf("unset release pin = %q, want 1.0.0", got)
+	}
+	if got := effectiveLosslessClawSettings(LosslessClawSettings{Version: "1.0.0"}, LosslessClawSettings{Version: "1.1.0"}).Version; got != "1.1.0" {
+		t.Errorf("override release pin = %q, want 1.1.0", got)
+	}
+}
+
+func TestApplyContextEngineConfigUpdatesPinnedReleaseAndRestarts(t *testing.T) {
+	setupHandlersTestDB(t)
+	if err := database.SetSetting("default_context_engine_settings", `{"version":"1.1.0"}`); err != nil {
+		t.Fatal(err)
+	}
+	inst := &database.Instance{Name: "bot-x", ContextEngine: "lossless-claw"}
+	agent := &mockInstance{results: []callResult{
+		{stdout: `{"plugins":[{"id":"lossless-claw","version":"1.0.0"}]}`},
+		{}, // plugins update
+	}}
+	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
+
+	argv, ok := findCall(agent.calls, "plugins", "update", "npm:@martian-engineering/lossless-claw@1.1.0")
+	if !ok {
+		t.Fatalf("pinned release was not updated: %v", agent.calls)
+	}
+	if !hasArg(argv, "--accept-capabilities") {
+		t.Errorf("update must accept reviewed capabilities: %v", argv)
+	}
+	if _, ok := findCall(agent.calls, "gateway", "stop", "--force"); !ok {
+		t.Errorf("gateway was not restarted after plugin update: %v", agent.calls)
 	}
 }

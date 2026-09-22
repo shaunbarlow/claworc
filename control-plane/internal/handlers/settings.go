@@ -343,6 +343,7 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	// downstream (see effectiveContextEngine), matching default_search_provider's
 	// "empty means leave it alone" treatment.
 	contextEngineChanged := false
+	losslessVersionChanged := false
 	if v, ok := raw["default_context_engine"]; ok {
 		if strVal, ok := v.(string); ok {
 			if !isValidContextEngine(strVal) {
@@ -378,11 +379,15 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Invalid default_context_engine_settings")
 			return
 		}
-		if _, err := parseLosslessClawSettings(b); err != nil {
+		next, err := parseLosslessClawSettings(b)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "Invalid default_context_engine_settings: "+err.Error())
 			return
 		}
 		prev, _ := database.GetSetting("default_context_engine_settings")
+		if effectiveLosslessClawSettings(loadLosslessClawSettings(prev), LosslessClawSettings{}).Version != effectiveLosslessClawSettings(next, LosslessClawSettings{}).Version {
+			losslessVersionChanged = true
+		}
 		if string(b) != prev {
 			contextEngineChanged = true
 		}
@@ -561,12 +566,31 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Reconcile every running instance's OpenClaw context-engine config when
-	// the global defaults changed. Hot-reloadable (see applyContextEngineConfig),
-	// so — unlike the memory/search cascades above — this never needs the
-	// env-var drift-restart path, only a config push.
+	// A Lossless version pin is injected as a container environment variable so
+	// the boot reconciler can converge plugin state. Changing it therefore needs
+	// a container recreate; a gateway-only restart would immediately re-read the
+	// stale env value and could undo the update. Other context settings are hot.
 	if contextEngineChanged {
-		pushContextEngineConfigForRunningInstances()
+		if losslessVersionChanged {
+			var instances []database.Instance
+			database.DB.Find(&instances)
+			for i := range instances {
+				if database.IsLegacyEmbedded(instances[i].ContainerImage) || effectiveContextEngine(&instances[i]) != "lossless-claw" {
+					continue
+				}
+				// Explicit per-agent pins remain untouched when only the global
+				// default moved.
+				if loadLosslessClawSettings(instances[i].ContextEngineSettings).Version != "" {
+					continue
+				}
+				restartInstanceAsync(instances[i], callerID(r))
+				restartingInstances = append(restartingInstances, restartTarget{
+					ID: instances[i].ID, Name: instances[i].Name, DisplayName: instances[i].DisplayName,
+				})
+			}
+		} else {
+			pushContextEngineConfigForRunningInstances()
+		}
 	}
 
 	resp := settingsToResponse(getAllSettings())

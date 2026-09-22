@@ -50,6 +50,7 @@ export default function ContextEngineSettingsEditor({
   isSaving,
 }: Props) {
   const [draftEngine, setDraftEngine] = useState<"" | "legacy" | "lossless-claw">(engine);
+  const [losslessVersion, setLosslessVersion] = useState<"" | "1.0.0" | "1.1.0">(losslessClaw.version ?? "");
   const [resetMode, setResetMode] = useState<"" | "daily" | "idle">(sessionReset.mode ?? "");
   const [resetIdleMinutes, setResetIdleMinutes] = useState(
     sessionReset.idle_minutes != null ? String(sessionReset.idle_minutes) : "",
@@ -124,6 +125,7 @@ export default function ContextEngineSettingsEditor({
 
   const buildLosslessClaw = (): LosslessClawSettings => {
     const out: LosslessClawSettings = {};
+    if (losslessVersion) out.version = losslessVersion;
     if (contextThreshold) out.context_threshold = Number(contextThreshold);
     if (freshTailCount) out.fresh_tail_count = Number(freshTailCount);
     if (leafChunkTokens) out.leaf_chunk_tokens = Number(leafChunkTokens);
@@ -153,6 +155,7 @@ export default function ContextEngineSettingsEditor({
     losslessClaw,
     sessionReset,
     draftEngine,
+    losslessVersion,
     contextThreshold,
     freshTailCount,
     leafChunkTokens,
@@ -237,6 +240,17 @@ export default function ContextEngineSettingsEditor({
 
         {losslessVisible && (
           <>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Lossless-claw Release</label>
+              <select value={losslessVersion} onChange={(e) => setLosslessVersion(e.target.value as "" | "1.0.0" | "1.1.0")} className={inputCls}>
+                <option value="">
+                  {effectiveLosslessClaw?.version ? `Inherit (${effectiveLosslessClaw.version})` : "Default (1.0.0)"}
+                </option>
+                <option value="1.0.0">1.0.0</option>
+                <option value="1.1.0">1.1.0</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">Pinned per agent or globally; Claworc only offers releases explicitly approved in its control plane.</p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Context Threshold</label>

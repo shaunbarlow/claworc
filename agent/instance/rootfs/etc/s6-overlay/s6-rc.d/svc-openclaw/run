@@ -44,6 +44,22 @@ ensure_plugin() {
         || echo "svc-openclaw: could not install $package (continuing)"
 }
 
+# The context engine is a versioned Claworc dependency, unlike optional
+# channel plugins. The desired npm spec is rendered from the control-plane's
+# allowlist, so boot converges persisted plugin state to that exact release
+# instead of following npm's latest tag or leaving a stale PVC install alive.
+ensure_versioned_plugin() {
+    local package="$1"
+    local spec="$2"
+    if plugin_installed "$package"; then
+        s6-setuidgid claworc openclaw plugins update "$spec" --accept-capabilities \
+            || { echo "svc-openclaw: could not update required context engine $spec"; return 1; }
+        return
+    fi
+    s6-setuidgid claworc openclaw plugins install "$spec" --accept-capabilities \
+        || { echo "svc-openclaw: could not install required context engine $spec"; return 1; }
+}
+
 if [ -n "$OPENCLAW_INITIAL_SLACK" ]; then
     ensure_plugin @openclaw/slack
 fi
@@ -54,7 +70,7 @@ if [ -n "$OPENCLAW_INITIAL_BRAVE_PLUGIN" ]; then
     ensure_plugin @openclaw/brave-plugin
 fi
 if [ -n "$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN" ]; then
-    ensure_plugin @martian-engineering/lossless-claw
+    ensure_versioned_plugin @martian-engineering/lossless-claw "$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN" || exit 1
 fi
 
 # Always reaffirm gateway settings — these are baked into the skeleton too,

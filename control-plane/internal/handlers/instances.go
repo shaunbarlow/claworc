@@ -868,7 +868,9 @@ func buildCreateParams(inst database.Instance) orchestrator.CreateParams {
 		envVars["OPENCLAW_INITIAL_BRAVE_PLUGIN"] = "1"
 	}
 	if effectiveContextEngine(&inst) == "lossless-claw" {
-		envVars["OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN"] = "1"
+		globalRaw, _ := database.GetSetting("default_context_engine_settings")
+		settings := effectiveLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings))
+		envVars["OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN"] = losslessClawPluginSpec(settings.Version)
 	}
 	// Brave (or a future managed search provider) key rides the container
 	// environment the same way, and the env var is the only place it lives on

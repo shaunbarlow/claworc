@@ -83,7 +83,7 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     expect(script.stdout).not.toContain("tail -f /dev/null");
   });
 
-  it("boot installs only missing channel plugins", () => {
+  it("boot reconciles optional plugins and the pinned context engine", () => {
     const script = exec(container!, [
       "cat",
       "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
@@ -93,13 +93,14 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
       "@openclaw/slack",
       "@openclaw/discord",
       "@openclaw/brave-plugin",
-      "@martian-engineering/lossless-claw",
     ];
     for (const plugin of managedPlugins) {
       expect(script.stdout).toContain(`ensure_plugin ${plugin}`);
     }
     expect(script.stdout).toContain("openclaw plugins list --json");
     expect(script.stdout).toContain("plugins install \"$package\" --accept-capabilities");
+    expect(script.stdout).toContain("ensure_versioned_plugin @martian-engineering/lossless-claw \"$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN\"");
+    expect(script.stdout).toContain("plugins update \"$spec\" --accept-capabilities");
     expect(script.stdout).not.toContain("--accept-capabilities --force");
   });
 

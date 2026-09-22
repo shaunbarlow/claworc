@@ -36,6 +36,25 @@ var contextEnginePluginSpecs = map[string]string{
 	"lossless-claw": "@martian-engineering/lossless-claw",
 }
 
+// Context reconstruction is durable state, so Lossless releases are approved
+// by Claworc rather than following npm's moving latest tag. Add a version here
+// only after it has been tested with the OpenClaw versions we ship.
+const defaultLosslessClawVersion = "1.0.0"
+
+var supportedLosslessClawVersions = map[string]struct{}{
+	"1.0.0": {},
+	"1.1.0": {},
+}
+
+func isSupportedLosslessClawVersion(version string) bool {
+	_, ok := supportedLosslessClawVersions[version]
+	return ok
+}
+
+func losslessClawPluginSpec(version string) string {
+	return "npm:@martian-engineering/lossless-claw@" + version
+}
+
 // isValidContextEngine reports whether v is a context engine Claworc knows
 // how to configure. "" means "inherit" (per-instance) or "use OpenClaw's own
 // default" (global default) — both resolve to "legacy" downstream.
@@ -128,6 +147,10 @@ func mergeSessionResetSettings(global, override SessionResetSettings) SessionRes
 // MemorySettings's pointer/omitempty pattern so "not set — inherit" is
 // distinguishable from an explicit value.
 type LosslessClawSettings struct {
+	// Version pins the approved lossless-claw release for this scope. An unset
+	// instance value inherits the global value; legacy unset settings resolve
+	// to 1.0.0 so this feature never upgrades an existing agent silently.
+	Version string `json:"version,omitempty"`
 	// ContextThreshold maps to contextThreshold: fraction of the context
 	// window (0.0-1.0) that triggers compaction.
 	ContextThreshold *float64 `json:"context_threshold,omitempty"`
@@ -184,6 +207,9 @@ func parseLosslessClawSettings(raw []byte) (LosslessClawSettings, error) {
 	if err := dec.Decode(&s); err != nil {
 		return s, err
 	}
+	if s.Version != "" && !isSupportedLosslessClawVersion(s.Version) {
+		return s, fmt.Errorf("version must be one of: 1.0.0, 1.1.0")
+	}
 	if s.ContextThreshold != nil && (*s.ContextThreshold < 0 || *s.ContextThreshold > 1) {
 		return s, fmt.Errorf("context_threshold must be between 0 and 1")
 	}
@@ -230,6 +256,9 @@ func loadLosslessClawSettings(raw string) LosslessClawSettings {
 // mergeMemorySettings.
 func mergeLosslessClawSettings(global, override LosslessClawSettings) LosslessClawSettings {
 	out := global
+	if override.Version != "" {
+		out.Version = override.Version
+	}
 	if override.ContextThreshold != nil {
 		out.ContextThreshold = override.ContextThreshold
 	}
@@ -265,6 +294,14 @@ func mergeLosslessClawSettings(global, override LosslessClawSettings) LosslessCl
 	}
 	if len(override.Advanced) > 0 {
 		out.Advanced = override.Advanced
+	}
+	return out
+}
+
+func effectiveLosslessClawSettings(global, override LosslessClawSettings) LosslessClawSettings {
+	out := mergeLosslessClawSettings(global, override)
+	if out.Version == "" {
+		out.Version = defaultLosslessClawVersion
 	}
 	return out
 }
@@ -346,17 +383,17 @@ func buildContextEngineLLMPolicy(s LosslessClawSettings) (policy map[string]inte
 // decoded `plugins list --json` payload. known=false means the payload could
 // not be parsed and the caller should not treat that as "missing". Mirrors
 // searchPluginPresent.
-func contextEnginePluginPresent(stdout, pluginID string) (present bool, known bool) {
+func contextEnginePluginPresent(stdout, pluginID string) (present bool, version string, known bool) {
 	var listed openclawPluginsList
 	if err := json.Unmarshal([]byte(extractJSONObject(stdout)), &listed); err != nil {
-		return false, false
+		return false, "", false
 	}
 	for _, p := range listed.Plugins {
 		if p.ID == pluginID {
-			return true, true
+			return true, p.Version, true
 		}
 	}
-	return false, true
+	return false, "", true
 }
 
 // ensureContextEnginePluginInstalled installs the plugin backing a managed
@@ -365,11 +402,11 @@ func contextEnginePluginPresent(stdout, pluginID string) (present bool, known bo
 // and the config it is about to push depends on the plugin being
 // discoverable. Mirrors ensureSearchPluginInstalled.
 //
-// Only a confirmed-absent plugin is installed. Returns installed=true only
-// when this call actually performed a fresh install, so the caller knows a
-// gateway restart is needed to make the agent discover it.
-func ensureContextEnginePluginInstalled(ctx context.Context, agent sshproxy.Instance, name, engine string) (installed bool) {
-	spec, ok := contextEnginePluginSpecs[engine]
+// A confirmed-absent plugin is installed; a confirmed different version is
+// updated to the explicit approved spec. Returns true only when plugin bytes
+// changed, so the caller can restart the gateway to load them.
+func ensureContextEnginePluginInstalled(ctx context.Context, agent sshproxy.Instance, name, engine, version string) (changed bool) {
+	_, ok := contextEnginePluginSpecs[engine]
 	if !ok {
 		return false
 	}
@@ -378,22 +415,39 @@ func ensureContextEnginePluginInstalled(ctx context.Context, agent sshproxy.Inst
 		log.Printf("context-engine-config: %s: could not list installed plugins, skipping %s install check: %v", name, engine, err)
 		return false
 	}
-	present, known := contextEnginePluginPresent(stdout, engine)
+	present, installedVersion, known := contextEnginePluginPresent(stdout, engine)
 	if !known {
 		log.Printf("context-engine-config: %s: could not read the agent's plugin list, skipping %s install check", name, engine)
 		return false
 	}
 	if present {
-		return false
+		// Version was absent from older hosts' list output. Avoid a blind update
+		// there; current hosts include it and can prove a requested change.
+		if installedVersion == "" || installedVersion == version {
+			return false
+		}
+		wantedSpec := losslessClawPluginSpec(version)
+		log.Printf("context-engine-config: %s: updating %s from %s to %s", name, engine, installedVersion, version)
+		_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "update", wantedSpec, "--accept-capabilities")
+		if err != nil {
+			log.Printf("context-engine-config: %s: %s update failed: %v", name, wantedSpec, err)
+			return false
+		}
+		if code != 0 {
+			log.Printf("context-engine-config: %s: %s update exited %d: %s", name, wantedSpec, code, utils.SanitizeForLog(stderr))
+			return false
+		}
+		return true
 	}
-	log.Printf("context-engine-config: %s: installing %s for the %s context engine", name, spec, engine)
-	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", spec, "--accept-capabilities", "--force")
+	wantedSpec := losslessClawPluginSpec(version)
+	log.Printf("context-engine-config: %s: installing %s for the %s context engine", name, wantedSpec, engine)
+	_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "install", wantedSpec, "--accept-capabilities", "--force")
 	if err != nil {
-		log.Printf("context-engine-config: %s: %s install failed: %v", name, spec, err)
+		log.Printf("context-engine-config: %s: %s install failed: %v", name, wantedSpec, err)
 		return false
 	}
 	if code != 0 {
-		log.Printf("context-engine-config: %s: %s install exited %d: %s", name, spec, code, utils.SanitizeForLog(stderr))
+		log.Printf("context-engine-config: %s: %s install exited %d: %s", name, wantedSpec, code, utils.SanitizeForLog(stderr))
 		return false
 	}
 	return true
@@ -494,9 +548,9 @@ func applyContextEngineConfig(ctx context.Context, agent sshproxy.Instance, name
 	}
 
 	globalRaw, _ := database.GetSetting("default_context_engine_settings")
-	s := mergeLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings))
+	s := effectiveLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings))
 
-	installedNow := ensureContextEnginePluginInstalled(ctx, agent, name, engine)
+	installedNow := ensureContextEnginePluginInstalled(ctx, agent, name, engine, s.Version)
 	applySessionResetConfig(ctx, agent, name, inst)
 
 	cfg := buildLosslessClawConfig(s)
@@ -621,7 +675,7 @@ func buildInstanceContextEngineResponse(inst *database.Instance) instanceContext
 		EffectiveEngine:        effectiveContextEngine(inst),
 		DefaultEngine:          defaultEngine,
 		LosslessClaw:           override,
-		EffectiveLosslessClaw:  mergeLosslessClawSettings(loadLosslessClawSettings(globalRaw), override),
+		EffectiveLosslessClaw:  effectiveLosslessClawSettings(loadLosslessClawSettings(globalRaw), override),
 		SessionReset:           reset,
 		EffectiveSessionReset:  mergeSessionResetSettings(globalReset, reset),
 		RestartsGatewayOnApply: false,
@@ -686,6 +740,9 @@ func SetInstanceContextEngine(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Context engine configuration does not apply to legacy embedded instances")
 		return
 	}
+	globalRaw, _ := database.GetSetting("default_context_engine_settings")
+	oldEngine := effectiveContextEngine(&inst)
+	oldVersion := effectiveLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings)).Version
 
 	updates := map[string]interface{}{}
 	if body.ContextEngine != nil {
@@ -737,8 +794,17 @@ func SetInstanceContextEngine(w http.ResponseWriter, r *http.Request) {
 		inst.SessionResetSettings = v
 	}
 
-	// Reconcile the agent's OpenClaw config (async, best-effort).
-	pushContextEngineConfig(inst.ID, inst.Name)
+	newEngine := effectiveContextEngine(&inst)
+	newVersion := effectiveLosslessClawSettings(loadLosslessClawSettings(globalRaw), loadLosslessClawSettings(inst.ContextEngineSettings)).Version
+	if oldEngine == "lossless-claw" && newEngine == "lossless-claw" && oldVersion != newVersion {
+		// The pin is injected at container creation for boot-time reconciliation.
+		// A gateway-only restart would still receive the old environment value.
+		restartInstanceAsync(inst, callerID(r))
+	} else {
+		// Other settings are hot-reloadable; a fresh install/update restarts the
+		// gateway itself when it actually changes plugin bytes.
+		pushContextEngineConfig(inst.ID, inst.Name)
+	}
 
 	writeJSON(w, http.StatusOK, buildInstanceContextEngineResponse(&inst))
 }

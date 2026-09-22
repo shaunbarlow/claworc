@@ -296,6 +296,8 @@ export interface SessionResetSettings {
  * authoritative field list, sourced from `openclaw plugins inspect
  * lossless-claw --json`'s configJsonSchema/configUiHints. */
 export interface LosslessClawSettings {
+  /** Approved lossless-claw release pin. Empty on an instance inherits the global default. */
+  version?: "1.0.0" | "1.1.0";
   /** Fraction of the context window (0-1) that triggers compaction. */
   context_threshold?: number;
   /** Number of recent messages protected from compaction. */

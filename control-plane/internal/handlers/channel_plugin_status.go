@@ -85,6 +85,7 @@ const pluginStatusCacheTTL = 2 * time.Minute
 type openclawPluginsList struct {
 	Plugins []struct {
 		ID         string   `json:"id"`
+		Version    string   `json:"version"`
 		Status     string   `json:"status"`
 		Error      string   `json:"error"`
 		ChannelIDs []string `json:"channelIds"`

@@ -710,7 +710,7 @@ function EnvironmentTab({
         losslessClaw={settings.default_context_engine_settings ?? {}}
         sessionReset={settings.default_session_reset ?? {}}
         effectiveSessionReset={settings.default_session_reset ?? {}}
-        footnote="Config changes apply live to every running agent; selecting lossless-claw for an agent that doesn't have it yet installs the plugin and restarts that agent's gateway."
+        footnote="Changing the pinned lossless-claw release updates and restarts affected gateways; other context-engine settings apply live."
         onSave={handleSaveContextEngineDefaults}
         isSaving={placementMutation.isPending}
       />
