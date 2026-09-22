@@ -330,6 +330,10 @@ func TestIntegration_InstanceLifecycle_ConfiguresOpenclaw(t *testing.T) {
 		"name":     "Test OpenAI",
 		"base_url": "https://api.openai.com/v1",
 		"api_type": "openai-completions",
+		"models": []map[string]string{{
+			"id":   "test-model",
+			"name": "Test Model",
+		}},
 	})
 	resp, err := client.Post(baseURL+"/api/v1/llm/providers", "application/json", bytes.NewReader(provBody))
 	if err != nil {
@@ -364,7 +368,7 @@ func TestIntegration_InstanceLifecycle_ConfiguresOpenclaw(t *testing.T) {
 	instBody, _ := json.Marshal(map[string]interface{}{
 		"display_name":      displayName,
 		"team_id":           1,
-		"models":            map[string]interface{}{"extra": []string{"test-model"}},
+		"models":            map[string]interface{}{"extra": []string{"test-openai/test-model"}},
 		"enabled_providers": []uint{provID},
 	})
 	resp, err = client.Post(baseURL+"/api/v1/instances", "application/json", bytes.NewReader(instBody))
@@ -503,10 +507,12 @@ func TestIntegration_InstanceLifecycle_ConfiguresOpenclaw(t *testing.T) {
 		}
 	}
 
-	// Assert agents.defaults.model.primary == "test-model"
+	// OpenClaw model routes are provider-qualified, so they can be validated
+	// against the provider declaration before becoming the agent default.
+	// Assert agents.defaults.model.primary == "test-openai/test-model".
 	primary := finalCfg.Agents.Defaults.Model.Primary
-	if primary != "test-model" {
-		t.Errorf("agents.defaults.model.primary = %q, want %q", primary, "test-model")
+	if primary != "test-openai/test-model" {
+		t.Errorf("agents.defaults.model.primary = %q, want %q", primary, "test-openai/test-model")
 	} else {
 		t.Logf("agents.defaults.model.primary = %q ✓", primary)
 	}
