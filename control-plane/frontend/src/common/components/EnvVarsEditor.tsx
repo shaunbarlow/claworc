@@ -5,8 +5,7 @@ import { ChevronDown, ChevronRight, Eye, EyeOff, Trash2 } from "lucide-react";
 const RESERVED = new Set([
   "OPENCLAW_GATEWAY_TOKEN",
   "CLAWORC_INSTANCE_ID",
-  "OPENCLAW_INITIAL_MODELS",
-  "OPENCLAW_INITIAL_PROVIDERS",
+  "OPENCLAW_INITIAL_CONFIG_BATCH",
 ]);
 
 const NAME_REGEX = /^[A-Z_][A-Z0-9_]*$/;

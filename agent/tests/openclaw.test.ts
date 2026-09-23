@@ -83,6 +83,18 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     expect(script.stdout).not.toContain("tail -f /dev/null");
   });
 
+  it("boot applies initial provider and model state atomically", () => {
+    const script = exec(container!, [
+      "cat",
+      "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
+    ]);
+    expect(script.exitCode).toBe(0);
+    expect(script.stdout).toContain("OPENCLAW_INITIAL_CONFIG_BATCH");
+    expect(script.stdout).toContain('config set --batch-json "$OPENCLAW_INITIAL_CONFIG_BATCH" --replace');
+    expect(script.stdout).not.toContain("OPENCLAW_INITIAL_MODELS");
+    expect(script.stdout).not.toContain("OPENCLAW_INITIAL_PROVIDERS");
+  });
+
   it("boot reconciles optional plugins and the pinned context engine", () => {
     const script = exec(container!, [
       "cat",

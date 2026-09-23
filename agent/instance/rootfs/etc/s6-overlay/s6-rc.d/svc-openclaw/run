@@ -115,27 +115,13 @@ if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
     s6-setuidgid claworc openclaw config set gateway.auth.token "$OPENCLAW_GATEWAY_TOKEN"
 fi
 
-# Apply initial model and provider config passed by Claworc at container creation.
-# This ensures the gateway starts with providers already configured, preventing
-# auth failures on messages that arrive before ConfigureInstance runs via SSH.
-#
-# Every one of these writes is a single `config set … --replace`. Claworc owns
-# these paths outright, so a value removed on the Claworc side has to disappear
-# here. `config set` already replaces most paths; models.providers is a
-# protected map path where it does not — without --replace OpenClaw refuses any
-# write that would drop an existing entry ("Refusing to replace
-# models.providers; it would remove existing entries"). The flag is passed
-# uniformly so every Claworc-owned path behaves the same and none of them can
-# be refused if OpenClaw protects more paths later.
-#
-# Never `config unset` first — that is a separate write, OpenClaw's size-drop
-# guard rejects it on a realistic config, and when it does land ahead of a
-# failing set the agent boots with the path gone entirely.
-if [ -n "$OPENCLAW_INITIAL_MODELS" ]; then
-    s6-setuidgid claworc openclaw config set agents.defaults.model "$OPENCLAW_INITIAL_MODELS" --replace --json
-fi
-if [ -n "$OPENCLAW_INITIAL_PROVIDERS" ]; then
-    s6-setuidgid claworc openclaw config set models.providers "$OPENCLAW_INITIAL_PROVIDERS" --replace --json
+# Apply the initial provider and model configuration as one transaction.
+# OpenClaw validates a provider-qualified model against models.providers, so
+# separate writes can reject the model before the provider is registered.
+# --batch-json validates the final state and persists every related path
+# atomically; a failure stops boot rather than starting a misconfigured agent.
+if [ -n "$OPENCLAW_INITIAL_CONFIG_BATCH" ]; then
+    s6-setuidgid claworc openclaw config set --batch-json "$OPENCLAW_INITIAL_CONFIG_BATCH" --replace
 fi
 
 # Apply the Claworc-managed Slack channel config. When set it is authoritative

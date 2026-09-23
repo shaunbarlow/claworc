@@ -32,14 +32,17 @@ override, the API rejects the request with HTTP 400.
 
 ## Reserved names
 
-Only these four exact names are reserved for internal use and rejected on input:
+The following control-plane names are reserved for internal use and rejected on input:
 
 | Name | Purpose |
 |------|---------|
 | `OPENCLAW_GATEWAY_TOKEN` | Auth token used by OpenClaw to call the LLM gateway. |
 | `CLAWORC_INSTANCE_ID` | Numeric DB id of this instance, surfaced to OpenClaw. |
-| `OPENCLAW_INITIAL_MODELS` | JSON seed of primary/fallback models, applied before first run. |
-| `OPENCLAW_INITIAL_PROVIDERS` | JSON seed of providers (base URL, api_type, virtual key, models). |
+| `OPENCLAW_INITIAL_CONFIG_BATCH` | Atomic JSON batch of provider and model configuration, applied before first run. |
+| `OPENCLAW_INITIAL_SLACK` | Managed Slack channel configuration applied at boot. |
+| `OPENCLAW_INITIAL_DISCORD` | Managed Discord channel configuration applied at boot. |
+| `OPENCLAW_INITIAL_BRAVE_PLUGIN` | Managed Brave plugin configuration applied at boot. |
+| `OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN` | Pinned managed context-engine plugin selector applied at boot. |
 
 All other `OPENCLAW_*` and `CLAWORC_*` names are allowed — users often need to
 configure OpenClaw itself or related tooling through env vars that share those

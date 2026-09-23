@@ -1395,20 +1395,19 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 	models := resolveInstanceModels(inst)
 	gatewayProviders := resolveGatewayProviders(inst)
 
-	// Build initial OpenClaw config env vars so the gateway starts with providers already configured
-	initialModelsJSON := ""
-	if len(models) > 0 {
-		modelConfig := map[string]interface{}{"primary": models[0]}
-		if len(models) > 1 {
-			modelConfig["fallbacks"] = models[1:]
-		} else {
-			modelConfig["fallbacks"] = []string{}
-		}
-		if b, err := json.Marshal(modelConfig); err == nil {
-			initialModelsJSON = string(b)
-		}
+	// Build one initial OpenClaw config transaction so the gateway sees its
+	// provider declaration and provider-qualified default model together on its
+	// first boot. Separate bootstrap writes fail OpenClaw validation because the
+	// model is checked before its custom provider has been registered.
+	initialProvidersJSON, err := buildOpenClawProvidersJSON(models, gatewayProviders, config.Cfg.LLMGatewayPort)
+	if err != nil {
+		log.Printf("Failed to build initial gateway providers for instance %d: %s", inst.ID, utils.SanitizeForLog(err.Error()))
 	}
-	initialProvidersJSON, _ := buildOpenClawProvidersJSON(models, gatewayProviders, config.Cfg.LLMGatewayPort)
+	initialConfigBatch, err := buildOpenClawConfigBatch(models, initialProvidersJSON)
+	if err != nil {
+		log.Printf("Failed to build initial OpenClaw config batch for instance %d: %s", inst.ID, utils.SanitizeForLog(err.Error()))
+		initialConfigBatch = ""
+	}
 
 	// Launch container creation asynchronously (image pull can take minutes).
 	// callerID is read here, not inside the closure: r is not safe to touch
@@ -1463,11 +1462,8 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 			}
 			// Models/providers are resolved outside buildCreateParams because
 			// they depend on the LLM gateway keys minted just above.
-			if initialModelsJSON != "" {
-				params.EnvVars["OPENCLAW_INITIAL_MODELS"] = initialModelsJSON
-			}
-			if initialProvidersJSON != "" {
-				params.EnvVars["OPENCLAW_INITIAL_PROVIDERS"] = initialProvidersJSON
+			if initialConfigBatch != "" {
+				params.EnvVars["OPENCLAW_INITIAL_CONFIG_BATCH"] = initialConfigBatch
 			}
 			params.OnProgress = func(msg string) { setStatusMessage(inst.ID, msg) }
 

@@ -90,11 +90,10 @@ path that builds a spec goes through it:
 | `UpdateImage` | Rebuilds the whole pod spec, so env rides along. |
 | `UpdateInstance`, Slack, Discord, global settings | Write, then call `EnsureEnvPropagated`. |
 
-`OPENCLAW_INITIAL_MODELS` / `OPENCLAW_INITIAL_PROVIDERS` are the exception:
-they are resolved in `CreateInstance` because they depend on the LLM gateway
-keys minted there, and are applied on top of `buildCreateParams`. A restart
-does not currently re-derive them, which is safe only because
-`ConfigureInstance` re-applies models and providers over SSH.
+`OPENCLAW_INITIAL_CONFIG_BATCH` is the exception: it is resolved in
+`CreateInstance` because it depends on LLM gateway keys minted there. It
+atomically applies provider and model state on first boot; later updates are
+reconciled by `ConfigureInstance` over SSH.
 
 ## Adding a new env var
 
