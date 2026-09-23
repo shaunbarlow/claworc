@@ -48,13 +48,23 @@ ensure_plugin() {
 # channel plugins. The desired npm spec is rendered from the control-plane's
 # allowlist, so boot converges persisted plugin state to that exact release
 # instead of following npm's latest tag or leaving a stale PVC install alive.
+#
+# `plugins install` accepts an `npm:`-prefixed spec, but `plugins update`
+# (OpenClaw 2026.9.x) resolves its argument against tracked installs and
+# rejects the prefix with "No tracked plugin or hook pack found", so the
+# update gets the bare package spec.
+#
+# An update failure (registry unreachable, release pulled, CLI change) must not
+# take the agent down: the engine is already installed and loadable, so keep
+# running on that release and leave the pin to converge on a later boot. Only a
+# missing engine is fatal, because config selects it as the context engine.
 ensure_versioned_plugin() {
     local package="$1"
     local spec="$2"
     if plugin_installed "$package"; then
-        s6-setuidgid claworc openclaw plugins update "$spec" --accept-capabilities \
-            || { echo "svc-openclaw: could not update required context engine $spec"; return 1; }
-        return
+        s6-setuidgid claworc openclaw plugins update "${spec#npm:}" --accept-capabilities \
+            || echo "svc-openclaw: could not update context engine to $spec; continuing with the installed release"
+        return 0
     fi
     s6-setuidgid claworc openclaw plugins install "$spec" --accept-capabilities \
         || { echo "svc-openclaw: could not install required context engine $spec"; return 1; }

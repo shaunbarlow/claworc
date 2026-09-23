@@ -355,7 +355,7 @@ func TestApplyContextEngineConfigUpdatesPinnedReleaseAndRestarts(t *testing.T) {
 	}}
 	applyContextEngineConfig(context.Background(), agent, "bot-x", inst)
 
-	argv, ok := findCall(agent.calls, "plugins", "update", "npm:@martian-engineering/lossless-claw@1.1.0")
+	argv, ok := findCall(agent.calls, "plugins", "update", "@martian-engineering/lossless-claw@1.1.0")
 	if !ok {
 		t.Fatalf("pinned release was not updated: %v", agent.calls)
 	}

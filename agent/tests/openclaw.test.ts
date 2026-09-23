@@ -112,7 +112,7 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     expect(script.stdout).toContain("openclaw plugins list --json");
     expect(script.stdout).toContain("plugins install \"$package\" --accept-capabilities");
     expect(script.stdout).toContain("ensure_versioned_plugin @martian-engineering/lossless-claw \"$OPENCLAW_INITIAL_CONTEXT_ENGINE_PLUGIN\"");
-    expect(script.stdout).toContain("plugins update \"$spec\" --accept-capabilities");
+    expect(script.stdout).toContain("plugins update \"${spec#npm:}\" --accept-capabilities");
     expect(script.stdout).not.toContain("--accept-capabilities --force");
   });
 

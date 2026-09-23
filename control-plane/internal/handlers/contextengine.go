@@ -55,6 +55,13 @@ func losslessClawPluginSpec(version string) string {
 	return "npm:@martian-engineering/lossless-claw@" + version
 }
 
+// losslessClawUpdateSpec is the spec for `openclaw plugins update`, which
+// matches its argument against tracked installs and rejects the `npm:` source
+// prefix that `plugins install` accepts ("No tracked plugin or hook pack found").
+func losslessClawUpdateSpec(version string) string {
+	return strings.TrimPrefix(losslessClawPluginSpec(version), "npm:")
+}
+
 // isValidContextEngine reports whether v is a context engine Claworc knows
 // how to configure. "" means "inherit" (per-instance) or "use OpenClaw's own
 // default" (global default) — both resolve to "legacy" downstream.
@@ -426,7 +433,7 @@ func ensureContextEnginePluginInstalled(ctx context.Context, agent sshproxy.Inst
 		if installedVersion == "" || installedVersion == version {
 			return false
 		}
-		wantedSpec := losslessClawPluginSpec(version)
+		wantedSpec := losslessClawUpdateSpec(version)
 		log.Printf("context-engine-config: %s: updating %s from %s to %s", name, engine, installedVersion, version)
 		_, stderr, code, err := agent.ExecOpenclaw(ctx, "plugins", "update", wantedSpec, "--accept-capabilities")
 		if err != nil {
