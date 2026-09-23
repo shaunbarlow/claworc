@@ -371,3 +371,26 @@ func TestUpdateSettings_EnvVars_NoOpSetSkipsRestart(t *testing.T) {
 		t.Errorf("no-op save must not restart anyone: %v", resp["restarting_instances"])
 	}
 }
+
+func TestUpdateSettings_AudioTranscription(t *testing.T) {
+	setupSettingsTest(t)
+
+	w := httptest.NewRecorder()
+	UpdateSettings(w, postJSON("/api/v1/settings", map[string]bool{
+		"default_audio_transcription": true,
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got, _ := database.GetSetting("default_audio_transcription"); got != "true" {
+		t.Errorf("default_audio_transcription = %q, want true", got)
+	}
+
+	w = httptest.NewRecorder()
+	UpdateSettings(w, postJSON("/api/v1/settings", map[string]string{
+		"default_audio_transcription": "true",
+	}))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("string setting status = %d, want 400", w.Code)
+	}
+}

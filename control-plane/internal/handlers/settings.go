@@ -40,6 +40,7 @@ var plainSettings = []string{
 	"default_user_agent",
 	"default_models",
 	"default_search_provider",
+	"default_audio_transcription",
 	"default_context_engine",
 	"analytics_consent",
 	"connector_enabled",
@@ -394,6 +395,23 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		database.SetSetting("default_context_engine_settings", string(b))
 	}
 
+	// Handle inbound audio transcription. This is static, hot-reloadable media config;
+	// changing it never restarts agent containers or adds a startup service.
+	audioTranscriptionChanged := false
+	if v, ok := raw["default_audio_transcription"]; ok {
+		b, ok := v.(bool)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "default_audio_transcription must be a boolean")
+			return
+		}
+		next := fmt.Sprintf("%t", b)
+		prev, _ := database.GetSetting("default_audio_transcription")
+		if next != prev {
+			audioTranscriptionChanged = true
+		}
+		database.SetSetting("default_audio_transcription", next)
+	}
+
 	// Handle builtin memory defaults. Track whether the key actually changed
 	// so we can reconcile running instances' OpenClaw config below.
 	memoryChanged := false
@@ -564,6 +582,12 @@ func UpdateSettings(w http.ResponseWriter, r *http.Request) {
 				pushSearchConfig(instances[i].ID, instances[i].Name)
 			}
 		}
+	}
+
+	// tools.media is hot-reloadable. Push only this config subtree to live
+	// instances; no container or gateway restart is necessary.
+	if audioTranscriptionChanged {
+		pushAudioTranscriptionConfigForRunningInstances()
 	}
 
 	// A Lossless version pin is injected as a container environment variable so

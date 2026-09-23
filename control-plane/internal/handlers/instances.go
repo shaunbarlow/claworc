@@ -298,6 +298,10 @@ type openclawProviderCfg struct {
 	API     string                   `json:"api"`
 	APIKey  string                   `json:"apiKey"`
 	Models  []database.ProviderModel `json:"models"`
+	// Claworc routes provider traffic through its agent-local LLM gateway. This
+	// narrow opt-in lets OpenClaw use that configured loopback origin for media
+	// uploads as well as chat requests; it does not permit arbitrary private URLs.
+	Request map[string]bool `json:"request,omitempty"`
 }
 
 // isNativeOpenAIHost reports whether baseURL points at OpenAI's own API host.
@@ -414,6 +418,10 @@ func buildOpenClawProvidersJSON(models []string, gatewayProviders map[string]Gat
 			API:     declaredAPI,
 			APIKey:  gp.Key,
 			Models:  declaredModels,
+			// The configured provider origin is Claworc's agent-local LLM
+			// gateway. Permit this exact loopback route for media uploads too;
+			// this does not relax the policy for arbitrary attachment URLs.
+			Request: map[string]bool{"allowPrivateNetwork": true},
 		}
 	}
 
@@ -1403,7 +1411,7 @@ func CreateInstance(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to build initial gateway providers for instance %d: %s", inst.ID, utils.SanitizeForLog(err.Error()))
 	}
-	initialConfigBatch, err := buildOpenClawConfigBatch(models, initialProvidersJSON)
+	initialConfigBatch, err := buildOpenClawConfigBatch(models, initialProvidersJSON, audioTranscriptionEnabled())
 	if err != nil {
 		log.Printf("Failed to build initial OpenClaw config batch for instance %d: %s", inst.ID, utils.SanitizeForLog(err.Error()))
 		initialConfigBatch = ""
@@ -3035,8 +3043,8 @@ type openclawConfigBatchOperation struct {
 // buildOpenClawConfigBatch builds the complete provider/model desired state for
 // one atomic OpenClaw config mutation. The four paths are interdependent: a
 // custom provider must exist while its provider-qualified model is selected.
-func buildOpenClawConfigBatch(models []string, providersJSON string) (string, error) {
-	operations := make([]openclawConfigBatchOperation, 0, 4)
+func buildOpenClawConfigBatch(models []string, providersJSON string, audioTranscription bool) (string, error) {
+	operations := make([]openclawConfigBatchOperation, 0, 5)
 	if providersJSON != "" {
 		var providers interface{}
 		if err := json.Unmarshal([]byte(providersJSON), &providers); err != nil {
@@ -3058,6 +3066,12 @@ func buildOpenClawConfigBatch(models []string, providersJSON string) (string, er
 			openclawConfigBatchOperation{Path: "agents.defaults.models", Value: modelsMap},
 			openclawConfigBatchOperation{Path: "agents.defaults.modelPolicy.allow", Value: models},
 		)
+	}
+	if audioTranscription {
+		// This joins the existing initial config transaction rather than adding
+		// another boot command, so enabling transcription does not create a
+		// per-feature startup tax.
+		operations = append(operations, openclawConfigBatchOperation{Path: "tools.media", Value: managedAudioTranscriptionConfig()})
 	}
 	if len(operations) == 0 {
 		return "", nil
@@ -3088,7 +3102,7 @@ func ConfigureInstance(ctx context.Context, ops orchestrator.ContainerOrchestrat
 			return
 		}
 	}
-	batchJSON, err := buildOpenClawConfigBatch(models, providersJSON)
+	batchJSON, err := buildOpenClawConfigBatch(models, providersJSON, audioTranscriptionEnabled())
 	if err != nil {
 		log.Printf("Error building OpenClaw config batch for %s: %v", utils.SanitizeForLog(name), err)
 		return

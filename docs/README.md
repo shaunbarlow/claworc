@@ -28,5 +28,6 @@ Claworc replaces this manual approach by:
 | [Environment Variables](environment-variables.md) | Global and per-instance env vars, reserved names, and skill `required_env_vars` |
 | [SSH Connectivity](ssh-connectivity.md) | SSH architecture, tunnels, health monitoring, and key rotation |
 | [Builtin Memory Configuration](memory-config.md) | OpenClaw builtin memory.search.\* defaults + per-agent overrides, shared-folder indexing |
+| [Inbound Audio Transcription](audio-transcription.md) | Enable low-overhead voice-message and audio-attachment transcription for managed agents |
 | [Kubernetes Deployment](deployment/kubernetes.md) | Kubernetes deployment guide with SSH network policies and security contexts |
 | [Docker Deployment](deployment/docker.md) | Docker deployment guide with SSH network configuration |

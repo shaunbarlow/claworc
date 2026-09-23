@@ -890,6 +890,32 @@ function MiscTab({
     <div className="space-y-8 max-w-2xl">
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-2">
+          <div>
+            <h3 className="text-sm font-medium text-gray-900">Voice-message transcription</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Transcribe inbound audio attachments for every agent with the managed OpenAI provider.
+              This only writes hot-reloadable OpenClaw config: no plugin, sidecar, startup probe, or
+              agent restart is added.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 cursor-pointer text-xs text-gray-700 shrink-0">
+            <input
+              type="checkbox"
+              checked={settings.default_audio_transcription === true || settings.default_audio_transcription === "true"}
+              disabled={connectorMutation.isPending}
+              onChange={(e) => connectorMutation.mutate({ default_audio_transcription: e.target.checked })}
+            />
+            Enabled
+          </label>
+        </div>
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md p-2.5">
+          Audio is sent to the selected provider for transcription. Agents without a compatible managed
+          OpenAI provider will report a transcription error until one is configured.
+        </p>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
             <Key size={14} />
             SSH Tunnel

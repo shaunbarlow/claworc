@@ -31,6 +31,8 @@ export interface Settings {
   default_ports: import("./instance").PortSpec[];
   /** Default web-search provider for agents without an override. "" = leave OpenClaw's own auto-detection alone. */
   default_search_provider: "" | "brave";
+  /** Enable inbound audio and voice-message transcription for all agents. */
+  default_audio_transcription: boolean | string;
   /** Global builtin memory defaults, merged under per-agent overrides. */
   default_memory_settings: import("./instance").MemorySettings;
   /** Default OpenClaw context engine for agents without an override. "" resolves to "legacy". */
@@ -90,6 +92,7 @@ export interface SettingsUpdatePayload {
   default_affinity?: string;
   default_service_account_annotations?: Record<string, string>;
   default_ports?: import("./instance").PortSpec[];
+  default_audio_transcription?: boolean;
   default_memory_settings?: import("./instance").MemorySettings;
   default_search_provider?: "" | "brave";
   default_context_engine?: "" | "legacy" | "lossless-claw";
