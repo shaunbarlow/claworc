@@ -38,7 +38,7 @@ func managedAudioTranscriptionConfig() map[string]interface{} {
 // applyAudioTranscriptionConfig changes a hot-reloadable OpenClaw config path.
 // It intentionally never restarts the container or gateway: OpenClaw applies
 // tools.media changes live. Disabling removes only Claworc's managed subtree.
-func applyAudioTranscriptionConfig(ctx context.Context, agent sshproxy.Instance, name string, enabled bool) {
+func applyAudioTranscriptionConfig(ctx context.Context, agent sshproxy.Instance, name string, enabled bool, providerKeys []string) {
 	name = utils.SanitizeForLog(name)
 	if !enabled {
 		if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "unset", "tools.media"); err != nil || code != 0 {
@@ -46,6 +46,16 @@ func applyAudioTranscriptionConfig(ctx context.Context, agent sshproxy.Instance,
 		}
 		return
 	}
+	// Existing agents can predate the provider-level policy emitted during
+	// provisioning. Write the narrow exception explicitly before enabling
+	// media, so the first voice note cannot fail with SsrFBlockedError.
+	for _, providerKey := range providerKeys {
+		path := "models.providers." + providerKey + ".request.allowPrivateNetwork"
+		if _, stderr, code, err := agent.ExecOpenclaw(ctx, "config", "set", path, "true", "--strict-json"); err != nil || code != 0 {
+			log.Printf("audio-transcription: %s: set %s failed: %v stderr=%q", name, path, err, utils.SanitizeForLog(stderr))
+		}
+	}
+
 	payload, err := json.Marshal(managedAudioTranscriptionConfig())
 	if err != nil {
 		log.Printf("audio-transcription: %s: marshal config: %v", name, err)
@@ -68,6 +78,10 @@ func pushAudioTranscriptionConfigForRunningInstances() {
 			continue
 		}
 		id, name := running[i].ID, running[i].Name
+		providerKeys := make([]string, 0)
+		for key := range resolveGatewayProviders(running[i]) {
+			providerKeys = append(providerKeys, key)
+		}
 		go func() {
 			ctx := context.Background()
 			client, err := SSHMgr.WaitForSSH(ctx, id, 120*time.Second)
@@ -75,7 +89,7 @@ func pushAudioTranscriptionConfigForRunningInstances() {
 				log.Printf("audio-transcription: no SSH connection for instance %d: %v", id, err)
 				return
 			}
-			applyAudioTranscriptionConfig(ctx, sshproxy.NewSSHInstance(client), name, enabled)
+			applyAudioTranscriptionConfig(ctx, sshproxy.NewSSHInstance(client), name, enabled, providerKeys)
 		}()
 	}
 }
