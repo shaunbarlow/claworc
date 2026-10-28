@@ -52,6 +52,7 @@ exports[`agent image > openclaw.json structure matches snapshot 1`] = `
     "migrations": {
       "modelPolicyAllowlist": "boolean",
       "utilityModelSeparation": "boolean",
+      "webhookListeners": "boolean",
     },
   },
   "tools": {

@@ -239,9 +239,8 @@ type catalogRootEntry struct {
 // checked 2026-08-21; claude-sonnet-4-6 fallback entry added 2026-08-31,
 // pricing cross-checked against openrouter.ai/anthropic/claude-sonnet-4.6 and
 // apidog.com/blog/claude-sonnet-4-6-pricing). OpenAI is pinned the same way,
-// verified against developers.openai.com/api/docs/models and .../pricing
-// (checked 2026-08-31) -- the live feed's OpenAI entry was still on the 5.2
-// generation. Every other provider keeps coming from the live feed unchanged
+// verified against each provider's official model/pricing docs (checked
+// 2026-10-28). Every other provider keeps coming from the live feed unchanged
 // -- pinning is per-provider, not a wholesale freeze, because nothing here
 // confirms the other entries are also stale.
 //
@@ -257,6 +256,34 @@ var hardcodedCatalogOverrides = func() map[string]catalogRootEntry {
 		APIFormat: "anthropic-messages",
 		BaseURL:   "https://api.anthropic.com/",
 		Models: []catalogRootModel{
+			{
+				ModelID: "claude-fable-5-1", ModelName: "Claude Fable 5.1",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 10, OutputCost: 50, CachedReadCost: 0.25, CachedWriteCost: 12.5,
+				Tag: "flagship", Description: "For demanding reasoning and long-horizon agentic work",
+			},
+			{
+				ModelID: "claude-opus-5-5", ModelName: "Claude Opus 5.5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 4, OutputCost: 20, CachedReadCost: 0.2, CachedWriteCost: 5,
+				Tag: "flagship", Description: "For long-running agentic coding and knowledge work",
+			},
+			{
+				ModelID: "claude-sonnet-5-5", ModelName: "Claude Sonnet 5.5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 2, OutputCost: 10, CachedReadCost: 0.1, CachedWriteCost: 2.5,
+				Tag: "balanced", Description: "The best combination of speed and intelligence",
+			},
+			{
+				ModelID: "claude-haiku-5-5", ModelName: "Claude Haiku 5.5",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1000000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 0.1, OutputCost: 0.5, CachedReadCost: 0.01, CachedWriteCost: 0.125,
+				Tag: "speed", Description: "For high-volume, latency-sensitive tasks",
+			},
 			{
 				ModelID: "claude-opus-5", ModelName: "Claude Opus 5",
 				Reasoning: true, Vision: true,
@@ -308,6 +335,27 @@ var hardcodedCatalogOverrides = func() map[string]catalogRootEntry {
 		APIFormat: "openai-completions",
 		BaseURL:   "https://api.openai.com/",
 		Models: []catalogRootModel{
+			{
+				ModelID: "gpt-6-astra", ModelName: "GPT-6 Astra",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 10, OutputCost: 50, CachedReadCost: 1, CachedWriteCost: 12.5,
+				Tag: "flagship", Description: "For the most demanding reasoning, coding, and agentic work",
+			},
+			{
+				ModelID: "gpt-6-sol", ModelName: "GPT-6 Sol",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 2, OutputCost: 10, CachedReadCost: 0.2, CachedWriteCost: 2.5,
+				Tag: "balanced", Description: "For complex coding and agentic workflows",
+			},
+			{
+				ModelID: "gpt-6-luna", ModelName: "GPT-6 Luna",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 0.1, OutputCost: 0.5, CachedReadCost: 0.01, CachedWriteCost: 0.125,
+				Tag: "speed", Description: "For focused, high-volume tasks",
+			},
 			{
 				ModelID: "gpt-5.6-sol", ModelName: "GPT-5.6 Sol",
 				Reasoning: true, Vision: true,

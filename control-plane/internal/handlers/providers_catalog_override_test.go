@@ -43,6 +43,8 @@ func TestApplyCatalogOverridesReplacesMatchingEntry(t *testing.T) {
 		t.Errorf("expected overridden label %q, got %q (live-feed value leaked through)", "Anthropic", anthropic.Label)
 	}
 	wantIDs := map[string]bool{
+		"claude-fable-5-1": true, "claude-opus-5-5": true,
+		"claude-sonnet-5-5": true, "claude-haiku-5-5": true,
 		"claude-opus-5": true, "claude-sonnet-5": true, "claude-haiku-4-5": true,
 		"claude-opus-4-8": true, "claude-opus-4-7": true, "claude-sonnet-4-6": true,
 	}
@@ -80,6 +82,7 @@ func TestApplyCatalogOverridesReplacesMatchingEntry(t *testing.T) {
 		t.Errorf("expected overridden label %q, got %q (live-feed value leaked through)", "OpenAI", openai.Label)
 	}
 	wantOpenAIIDs := map[string]bool{
+		"gpt-6-astra": true, "gpt-6-sol": true, "gpt-6-luna": true,
 		"gpt-5.6-sol": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
 		"gpt-5.5": true, "gpt-5.4": true,
 	}
@@ -185,6 +188,10 @@ func TestHardcodedAnthropicOverrideShape(t *testing.T) {
 		cacheRead  float64
 		cacheWrite float64
 	}{
+		{"claude-fable-5-1", true, true, 10, 50, 0.25, 12.5},
+		{"claude-opus-5-5", true, true, 4, 20, 0.2, 5},
+		{"claude-sonnet-5-5", true, true, 2, 10, 0.1, 2.5},
+		{"claude-haiku-5-5", true, true, 0.1, 0.5, 0.01, 0.125},
 		{"claude-opus-5", true, true, 5, 25, 0.5, 6.25},
 		{"claude-sonnet-5", true, true, 2, 10, 0.2, 2.5},
 		{"claude-haiku-4-5", true, true, 1, 5, 0.1, 1.25},
@@ -257,6 +264,9 @@ func TestHardcodedOpenAIOverrideShape(t *testing.T) {
 		cacheRead  float64
 		cacheWrite float64
 	}{
+		{"gpt-6-astra", true, true, 10, 50, 1, 12.5},
+		{"gpt-6-sol", true, true, 2, 10, 0.2, 2.5},
+		{"gpt-6-luna", true, true, 0.1, 0.5, 0.01, 0.125},
 		{"gpt-5.6-sol", true, true, 4, 20, 0.4, 5},
 		{"gpt-5.6-terra", true, true, 2, 12, 0.2, 2.5},
 		{"gpt-5.6-luna", true, true, 0.2, 1.2, 0.02, 0.25},
