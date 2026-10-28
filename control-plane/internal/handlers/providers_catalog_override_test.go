@@ -82,7 +82,7 @@ func TestApplyCatalogOverridesReplacesMatchingEntry(t *testing.T) {
 		t.Errorf("expected overridden label %q, got %q (live-feed value leaked through)", "OpenAI", openai.Label)
 	}
 	wantOpenAIIDs := map[string]bool{
-		"gpt-6-astra": true, "gpt-6-sol": true, "gpt-6-luna": true,
+		"gpt-6-astra": true, "gpt-6-sol": true, "gpt-6.1-terra": true, "gpt-6-luna": true,
 		"gpt-5.6-sol": true, "gpt-5.6-terra": true, "gpt-5.6-luna": true,
 		"gpt-5.5": true, "gpt-5.4": true,
 	}
@@ -266,6 +266,7 @@ func TestHardcodedOpenAIOverrideShape(t *testing.T) {
 	}{
 		{"gpt-6-astra", true, true, 10, 50, 1, 12.5},
 		{"gpt-6-sol", true, true, 2, 10, 0.2, 2.5},
+		{"gpt-6.1-terra", true, true, 1, 5, 0.05, 1.25},
 		{"gpt-6-luna", true, true, 0.1, 0.5, 0.01, 0.125},
 		{"gpt-5.6-sol", true, true, 4, 20, 0.4, 5},
 		{"gpt-5.6-terra", true, true, 2, 12, 0.2, 2.5},

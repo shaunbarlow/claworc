@@ -350,6 +350,13 @@ var hardcodedCatalogOverrides = func() map[string]catalogRootEntry {
 				Tag: "balanced", Description: "For complex coding and agentic workflows",
 			},
 			{
+				ModelID: "gpt-6.1-terra", ModelName: "GPT-6.1 Terra",
+				Reasoning: true, Vision: true,
+				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
+				InputCost: 1, OutputCost: 5, CachedReadCost: 0.05, CachedWriteCost: 1.25,
+				Tag: "balanced", Description: "For visual reasoning, precise computer use, and clear writing",
+			},
+			{
 				ModelID: "gpt-6-luna", ModelName: "GPT-6 Luna",
 				Reasoning: true, Vision: true,
 				ContextWindow: catalogIntPtr(1050000), MaxTokens: catalogIntPtr(128000),
