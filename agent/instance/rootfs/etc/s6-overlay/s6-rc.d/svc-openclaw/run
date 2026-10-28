@@ -13,6 +13,24 @@ export OPENCLAW_SERVICE_REPAIR_POLICY=external
 # PVC on first boot. By the time we get here, the remaining startup work is
 # applying env-driven config overrides and reconciling channel plugins.
 
+# The skeleton is only seeded onto an empty volume, so build-time doctor never
+# touches state persisted by an older image. When an image upgrade moves
+# OpenClaw onto a newer state schema, the gateway refuses to open the old
+# agent databases (SqliteSchemaMismatchError) and s6 restarts it forever.
+# Run doctor once per OpenClaw version change, before the gateway holds the
+# databases; doctor keeps its own pre-migration backups. The stamp is written
+# only on success so a failed migration is retried on the next start.
+doctor_stamp=/home/claworc/.openclaw/.claworc-doctor-version
+openclaw_version="$(s6-setuidgid claworc openclaw --version 2>/dev/null | head -1)"
+if [ -n "$openclaw_version" ] && [ "$(cat "$doctor_stamp" 2>/dev/null)" != "$openclaw_version" ]; then
+    echo "svc-openclaw: OpenClaw version changed ($(cat "$doctor_stamp" 2>/dev/null || echo unknown) -> $openclaw_version); running doctor --fix"
+    if s6-setuidgid claworc openclaw doctor --fix --non-interactive >> /var/log/claworc/openclaw.log 2>&1; then
+        s6-setuidgid claworc sh -c "printf '%s\n' '$openclaw_version' > '$doctor_stamp'"
+    else
+        echo "svc-openclaw: doctor --fix failed; see /var/log/claworc/openclaw.log"
+    fi
+fi
+
 # Slack and Discord are separate npm plugins rather than dependencies of the
 # openclaw package. For a channel configured through Claworc, install its
 # Managed plugins persist on the instance volume. Snapshot the registry once,

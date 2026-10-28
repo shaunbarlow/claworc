@@ -147,7 +147,8 @@ RUN bash -c '\
     [ -n "$WORKSPACE" ] || WORKSPACE=/home/claworc/.openclaw/workspace; \
     if [ -d "$WORKSPACE" ]; then \
       install -m 0644 /tmp/TOOLS.md "$WORKSPACE/TOOLS.md"; \
-    fi'
+    fi; \
+    openclaw --version | head -1 > /home/claworc/.openclaw/.claworc-doctor-version'
 USER root
 RUN mkdir -p /opt/openclaw-skeleton && \
     mv /home/claworc/.openclaw /opt/openclaw-skeleton/.openclaw && \

@@ -116,6 +116,23 @@ describe.skipIf(!container)("agent image", { timeout: 300_000 }, () => {
     expect(script.stdout).not.toContain("--accept-capabilities --force");
   });
 
+  it("boot migrates persisted state once per OpenClaw version change", () => {
+    const script = exec(container!, [
+      "cat",
+      "/etc/s6-overlay/s6-rc.d/svc-openclaw/run",
+    ]);
+    expect(script.exitCode).toBe(0);
+    expect(script.stdout).toContain("doctor_stamp=/home/claworc/.openclaw/.claworc-doctor-version");
+    expect(script.stdout).toContain("openclaw doctor --fix --non-interactive");
+  });
+
+  it("seeded state is stamped with the installed OpenClaw version", () => {
+    const stamp = exec(container!, ["cat", "/home/claworc/.openclaw/.claworc-doctor-version"]);
+    expect(stamp.exitCode).toBe(0);
+    const version = exec(container!, ["/command/s6-setuidgid", "claworc", "openclaw", "--version"]);
+    expect(stamp.stdout.trim()).toBe(version.stdout.trim().split("\n")[0]);
+  });
+
   // chrome-data must be created by the desktop service (only when Chrome runs),
   // not by init-setup.sh. Otherwise on-demand-layout agents — where Chrome
   // lives in a separate browser pod — would still get a stale chrome-data/
